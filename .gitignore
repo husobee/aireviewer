@@ -3,3 +3,4 @@
 .aireviewer/
 *.test
 *.out
+/.claude/
