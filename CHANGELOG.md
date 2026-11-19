@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M2: PR augmentation)
+- `pr_issues`: linked issues from GitHub `closingIssuesReferences` (GraphQL) or GitLab `closes_issues`, plus closing keywords in the PR body.
+- `repo_metrics`: deterministic history signals per changed file (commits over 30/90/365 days, bug-fix commits, authors, hotspot percentile), and a reproducible risk score with a published formula and explicit confidence. It is anchored to the merge base and works on blobless mirrors.
+- `symbol_refs`: references and fan-in of changed symbols, dangling references to deleted symbols, and changed interface files. Unexported Go identifiers are package-scoped.
+- `reviewers_suggest`: a deterministic reviewer suggestion (no LLM). It uses CODEOWNERS (including GitLab sections), recency-weighted git expertise, live workload from GitHub/GitLab, risk-aware weighting, GitHub login mapping, and a labelled email-local-part heuristic for GitLab.
+- `.aireviewer.yml` is parsed, and always read from the merge base.
+- Report `facets` for structured analyst results, and an `issue` evidence kind with a verbatim-quote check.
+- Agents: `alignment-analyst`, `risk-analyst` and `impact-analyst`. `summary-generator` returns to the paper's role (augmentation synthesis) and has a separate `findings-digest` mode.
+- `/pr-review` runs augmentation and the code review in parallel, suggests reviewers when none are assigned, leads the panel with the augmentation summary, and orders the diff-map by risk.
+- `aireviewer-mcp augment <url>`: debugging command for the deterministic augmentation tools.
+- The code reviewer and explainer now receive the linked-issue context (paper §4.2.3, §4.5.1).
+
+### Changed
+- The sticky analysis comment and reviewer requests moved from M2 to M3 (gated writes).
+
 ### Security / hardening (paper-fidelity audit, ADR 0005)
 - PR worktrees moved out of the workspace and into the cache. All code access reads git objects at a fixed commit through the new `code_read`, `code_search` and `code_list` tools. Subagents no longer get Read, Grep or Glob.
 - Per-dispatch submit tokens (`report_slot`): `report_submit` rejects reports without the matching token, so agents cannot forge or overwrite each other's reports.

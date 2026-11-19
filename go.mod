@@ -15,6 +15,7 @@ require (
 	github.com/tree-sitter/tree-sitter-rust v0.24.2
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2
 	gitlab.com/gitlab-org/api/client-go v1.46.0
+	go.yaml.in/yaml/v3 v3.0.6
 )
 
 require (

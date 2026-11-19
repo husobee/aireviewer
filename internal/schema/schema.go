@@ -53,6 +53,8 @@ type Evidence struct {
 	Value    any    `json:"value,omitempty"`
 	Source   string `json:"source,omitempty"`
 	Artifact string `json:"artifact,omitempty"`
+	Ref      string `json:"ref,omitempty"`
+	Quote    string `json:"quote,omitempty"`
 }
 
 // Claim is one finding.
@@ -84,6 +86,7 @@ type Report struct {
 	Summary        string          `json:"summary"`
 	Claims         []Claim         `json:"claims"`
 	Contradictions []Contradiction `json:"contradictions,omitempty"`
+	Facets         map[string]any  `json:"facets,omitempty"`
 }
 
 // Dropped records a claim removed during validation.
@@ -111,6 +114,8 @@ type Env struct {
 	// Metric returns the value a tool recorded for (source, name), if any.
 	// Metric evidence is accepted only when its value equals the recorded one.
 	Metric func(source, name string) (any, bool)
+	// IssueText returns the title and body of a linked issue by reference.
+	IssueText func(ref string) (string, bool)
 	// UpstreamClaims is the set of claim ids that synthesising agents may
 	// cite in "sources".
 	UpstreamClaims map[string]bool
@@ -207,6 +212,10 @@ func sameJSON(a, b any) bool {
 	return norm(a) == norm(b)
 }
 
+func normSpace(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
 func shaMatch(a, b string) bool {
 	if len(a) < 7 || len(b) < 7 {
 		return false
@@ -251,6 +260,17 @@ func checkEvidence(e Evidence, env Env) string {
 		}
 		if env.ArtifactExists == nil || !env.ArtifactExists(e.Artifact) {
 			return fmt.Sprintf("trace artifact %q not found in the run context", e.Artifact)
+		}
+	case "issue":
+		if env.IssueText == nil {
+			return fmt.Sprintf("issue %q cannot be verified (no linked issues loaded; call pr_issues)", e.Ref)
+		}
+		text, ok := env.IssueText(e.Ref)
+		if !ok {
+			return fmt.Sprintf("issue %q is not linked to this PR", e.Ref)
+		}
+		if !strings.Contains(normSpace(text), normSpace(e.Quote)) {
+			return fmt.Sprintf("quote is not verbatim text from issue %q", e.Ref)
 		}
 	default:
 		return fmt.Sprintf("unknown evidence kind %q", e.Kind)

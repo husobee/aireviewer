@@ -92,3 +92,26 @@ func TestNotFound(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestLinkedIssues(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.EscapedPath() {
+		case mrPath + "/closes_issues":
+			fmt.Fprint(w, `[{"id":103,"iid":3,"title":"Retries","description":"AC: backoff","state":"opened","web_url":"u3",
+				"labels":["bug"],"references":{"full":"grp/sub/proj#3"}}]`)
+		case "/api/v4/projects/grp%2Fsub%2Fproj/issues/8":
+			fmt.Fprint(w, `{"id":108,"iid":8,"title":"Docs","description":"d","state":"closed","web_url":"u8","references":{"full":"grp/sub/proj#8"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	pr := &forge.PR{Ref: ref, Body: "Closes #3 and fixes #8; fixes #999"}
+	got, err := newTestProvider(t, h).LinkedIssues(context.Background(), pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Ref != "grp/sub/proj#3" || got[0].State != "open" || got[0].Source != "closing_reference" ||
+		got[1].Ref != "grp/sub/proj#8" || got[1].Source != "body_keyword" {
+		t.Errorf("linked = %+v", got)
+	}
+}

@@ -205,7 +205,8 @@ The paper (§4.3, §4.3.5) requires every agent to emit structured findings: cla
 2. **Individual claims are dropped,** with the reasons returned, when any evidence item fails:
    - `code` evidence must name a file that exists on the stated side (`new` = head, `old` = merge base) with a line range inside that file;
    - `metric` evidence must name a metric a tool recorded in `metrics.json` (written only by tools), and its **value must equal the recorded one**;
-   - `trace` evidence must point at an existing `runtime/` execution artifact.
+   - `trace` evidence must point at an existing `runtime/` execution artifact;
+   - `issue` evidence (`{kind, ref, quote}`) must name a linked issue (`issues.json`), and its quote (at least 8 characters) must appear verbatim, ignoring whitespace and case, in that issue's title or body.
 
    **Limit:** the server verifies that evidence *exists*, not that the claim's statement is true of it. Semantic relevance is left to the human reviewer, helped by the highlighted views.
 
@@ -402,14 +403,30 @@ inputs ──►├─ risk-analyst ──────┤──► summary-gener
           └─ runtime-analyst ───┘
 ```
 
-All four analysts run **in parallel**: each needs only the diff, the issue context and its own tool evidence (§4.1). Each analyst is told about its tools and the schema. None of them can write anywhere except its report through the orchestrator.
+All four analysts run **in parallel**: each needs only the diff, the issue context and its own tool evidence (§4.1). Each analyst is told about its tools and the schema. None of them can write anywhere except its report through the orchestrator, and that write needs a submit token. Structured results go in the report's `facets`.
+
+**Implemented in M2 (as built):**
+- **Issues.** `pr_issues` fetches the linked issues into `issues.json`:
+  - GitHub: GraphQL `closingIssuesReferences` (needs a token) plus closing keywords in the body;
+  - GitLab: `closes_issues` plus closing keywords.
+
+  The `alignment-analyst` cites requirements with `issue` evidence, a verbatim quote that the server checks.
+- **Risk.** `repo_metrics` scans one `git log --name-only` pass over the year before the merge base. It reads trees only, so it works on blobless mirrors, and it is anchored to the merge-base commit time, so results are reproducible. It records:
+  - per-file signals: commits in the last 30, 90 and 365 days; bug-fix commits (keyword match on subjects, configurable); distinct authors; hotspot percentile;
+  - a **deterministic** score with a published formula: `file = 100·(0.35·hotspot + 0.30·bug_ratio + 0.15·min(authors/5,1) + 0.20·min(changed_lines/200,1))` and `pr = 0.6·max + 0.4·churn-weighted mean`;
+  - confidence: `low` when the repo has fewer than `min_history_commits`, and `medium` when most changed files have fewer than 3 commits in the year.
+
+  The analyst explains the score but cannot change it.
+- **Impact.** `symbol_refs` runs a word-boundary `git grep` at head for the symbols of modified and deleted units. It excludes the definition itself, and scopes unexported Go identifiers to their package. It reports the fan-in (distinct referencing files, used as centrality), dangling references to deleted symbols, a common-identifier warning, and changed interface files (proto, OpenAPI, GraphQL, schemas, migrations). Matching is textual, and the analyst verifies important references with `code_read`.
+- **Summary.** `summary-generator` runs in two modes. In `augmentation` mode it plays the paper's role and synthesises the analysts, with facets copied exactly and contradictions surfaced. In `digest` mode (agent name `findings-digest`) it summarises the code-review findings.
+- **Runtime.** Arrives in M5. Until then, the summary states "runtime evidence: not available".
 
 | Agent | Inputs / tools | Required output (beyond §6) |
 |---|---|---|
 | **alignment-analyst** (§4.3.1) | Issue title, body and acceptance criteria (parsed from checklists or "AC:" sections), PR details, diff-map | `category ∈ {exact, tangling, missing, missing_and_tangling}`; `tangling[]` (unit ids and line ranges, each with why it is unrelated); `missing[]` (acceptance criteria not satisfied, each with evidence of absence). Without a linked issue: `status: not_applicable` and a prominent warning. |
 | **risk-analyst** (§4.3.2) | MCP `repo_metrics`: per-file churn over 30/90/365 days, commit count, author count, bug-fix commit count (from fix keywords or bug-labelled PRs), hotspot rank, recent reverts, error-handling paths touched | `risk_score` 0–100 with a component breakdown; `hotspots[]`; **low confidence when history is sparse** (fewer than N commits), stated explicitly as the paper requires |
 | **impact-analyst** (§4.3.3) | MCP `symbol_refs` (callers and implementers of changed exported symbols, via LSP when available, else tree-sitter + ripgrep); changed API, schema, proto, OpenAPI, migration or config files; changed defaults | `impacts[]`, each with `type ∈ {behavioral, interface, operational}` and `scope ∈ {local, module, cross_module, cross_service}`; backward-compatibility verdict; a centrality estimate (the changed unit's fan-in) |
-| **runtime-analyst** (§4.3.4) | MCP `sandbox_run`: Docker, network off by default, no secrets mounted. Runs configured build/test/smoke commands on **base and head**. | Pass/fail delta; new failures; logs and trace artifacts; **flakiness handling**: failing tests are re-run `runtime.reruns` times (default 3) and classified `deterministic_fail \| flaky \| pass` before any claim is made. When not feasible (no config, no Docker): `status: not_applicable` with the reason. Never guessed. |
+| **runtime-analyst** (§4.3.4, M5) | MCP `sandbox_run`: Docker, network off by default, no secrets mounted. Runs configured build/test/smoke commands on **base and head**. | Pass/fail delta; new failures; logs and trace artifacts; **flakiness handling**: failing tests are re-run `runtime.reruns` times (default 3) and classified `deterministic_fail \| flaky \| pass` before any claim is made. When not feasible (no config, no Docker): `status: not_applicable` with the reason. Never guessed. |
 | **summary-generator** (§4.3.5) | The four reports | Keeps claim/evidence pairs and confidence. **Surfaces contradictions explicitly**, e.g. "alignment = exact, but impact = cross_module ×14". Produces a short summary for the sticky comment and a full one for the panel. |
 
 **Cost controls:**
@@ -430,6 +447,17 @@ All four analysts run **in parallel**: each needs only the diff, the issue conte
 - **Knowledge distribution:** a bonus for spreading knowledge on non-critical changes.
 
 Weights come from config. The tool can switch to "expertise first" when `risk_score` or impact scope is high, and "knowledge sharing first" otherwise. The author's own account and bots are excluded. Each suggestion is shown with its factor breakdown, and the author chooses.
+
+**As built (M2), suggestion only.** Requesting reviewers is a gated forge write that arrives in M3.
+- **Expertise:** recency-weighted commits on the changed files (half-life 90 days), normalised over eligible candidates.
+- **Experience:** the share of changed files the candidate touched in the last year. *Past review activity is not yet used.*
+- **Ownership:** CODEOWNERS read at the merge base, with gitignore-style patterns, last match wins, and GitLab `[Section] @owners` defaults.
+- **Workload:** open review requests. GitHub uses the search `is:open is:pr review-requested:<user>`; GitLab uses open MRs with `reviewer_username`. Unknown workload scores 0.5.
+- **Knowledge sharing:** `1 − expertise` for people with some familiarity. It is dropped (expertise-first mode) when `risk ≥ risk.high_risk` (default 60).
+- **Identity mapping:**
+  - GitHub maps commit emails to logins through the commits API.
+  - GitLab cannot do this without admin rights. There, an unmapped git identity whose email local part equals a known handle is merged into that handle, labelled as a heuristic. Otherwise it is shown as `git:<email>`.
+- **Skipping:** `/pr-review` skips selection when reviewers are already assigned, as the paper does.
 
 ### 11.2 Retrospective (§4.6) — `/pr-retro <url>` (phase 2)
 - `retro-summarizer` produces a review summary: the issue, the diff, how the augmentation reports changed across head SHAs, the reviewer-selection decision, key threads and their resolutions, and the final decision. All of these carry traceability links.
@@ -530,12 +558,13 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `policy_get(run_id)` | Review policy (CLAUDE.md, AGENTS.md, CONTRIBUTING, `.aireviewer.yml`) **from the merge base**, plus the list of policy files the PR modifies |
 | `review_plan(run_id, …)` | Deterministic review batches and the token-limit gate |
 | `findings_list(run_id)` · `finding_get(run_id, id)` · `diffmap_unit(…).highlighted` | Highlighted-diff walkthrough |
-| `repo_metrics(paths[], windows[])` | Churn, hotspots, bug-fix history |
-| `symbol_refs(symbols[], scope)` | Callers, implementers, importers |
+| `pr_issues(run_id)` | Linked issues (closing references plus closing keywords) saved for agents and issue-quote validation |
+| `repo_metrics(run_id)` | Change frequency, hotspots, bug-fix history, authors, deterministic risk score (records metrics) |
+| `symbol_refs(run_id, units?)` | References and fan-in of changed symbols, dangling refs, interface files (records metrics) |
 | `lint_run(cmd)` | Run configured analyzers in the sandbox; return normalised findings |
 | `sandbox_run(spec)` | Base vs head execution, reruns, artifacts |
 | `issues_search(queries[], filters)` · `issue_get(ref)` | Issue retrieval |
-| `reviewers_suggest(id, weights?)` | §11.1 |
+| `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
 | `review_metrics(id)` | §11.2 |
 | `run_context_get/put(run_id, path, json)` | Read and write `.aireviewer/runs` |
 | ✎ `git_apply_patch(patch, commit_msg)` · ✎ `git_push(branch)` | Gate 1 only |
@@ -573,8 +602,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M0** ✅ | Plugin scaffold; MCP skeleton; `forge_detect`, `pr_resolve`, `pr_get`, `pr_diff` for GitHub **and** GitLab; run-context store | `/pr-review <url>` prints PR metadata and diff stats for both forges |
 | **M1** ✅ (agent prompts not yet evaluated) | `pr_checkout`, `diffmap_build`/`get`/`unit`, `report_submit` with evidence validation, `evidence_check`; `code-reviewer`, `explainer`, `summary-generator` subagents; `/pr-review` panel and Q&A | Useful read-only review session on real PRs; schema validation enforced |
 | **M1.1** ✅ | Hardening from the paper-fidelity audit: submit tokens, `run_context_put` lockdown, worktrees out of the workspace plus confined `code_*` tools, policy from the merge base, metric value checks, token-limit gate, author-mode style findings | See ADR 0005 |
-| **M2** | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); sticky comment with marker reuse. **Also:** fetch linked (closing) issues in `/pr-review` and feed them to every analyst, the reviewer and the explainer; for PRs with no link, an issue-link *suggestion* in `/pr-review`; `reviewers_suggest` in `/pr-review` when nobody is assigned (requesting still gated); `summary-generator` returns to the paper's role of synthesising the four analysts, and the findings digest becomes separate | Augmentation reused across machines; staleness by head SHA works |
-| **M3** | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
+| **M2** ✅ (agent prompts not yet evaluated) | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); `pr_issues`; `reviewers_suggest`; `.aireviewer.yml` read from the merge base; issue-quote evidence and report `facets`; risk-ordered diff-map. **Moved to M3:** the sticky comment with marker reuse, because posting is a gated write and imported reports must be re-validated. **Also:** fetch linked (closing) issues in `/pr-review` and feed them to every analyst, the reviewer and the explainer; for PRs with no link, an issue-link *suggestion* in `/pr-review`; `reviewers_suggest` in `/pr-review` when nobody is assigned (requesting still gated); `summary-generator` returns to the paper's role of synthesising the four analysts, and the findings digest becomes separate | Augmentation reused across machines; staleness by head SHA works |
+| **M3** | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges; **gated** `reviewers_request` and `sticky_comment_upsert`. Reports imported from a sticky comment are re-validated against the local checkout and trusted only when authored by the current user or a configured bot. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
 | **M4** | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion | Branch → PR with linked issue and applied fixes, human-approved |
 | **M5** | `runtime-analyst` + `sandbox_run` (base/head, reruns, flakiness) | Deterministic vs flaky classification on a seeded flaky test |
 | **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497) | Metrics dashboard data accumulates; CI posts augmentation automatically |
@@ -586,6 +615,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | Paper | This system | Why |
 |---|---|---|
 | LLMs fine-tuned on VCS history | Prompted Claude models with repo templates and conventions | No training infrastructure; repo context gets most of the benefit |
+| JIT defect prediction models (DeepJIT, CC2Vec, JITLine) for bug proneness (§4.3.2) | A transparent weighted formula over git-history signals | No training data or models needed; every component is auditable, as the paper's explainability concern asks. A learned model can replace the formula behind the same tool later |
+| CIA via dependency graphs and architectural centrality (§4.3.3) | Textual reference search (fan-in) plus interface-file detection, verified by the agent | Language-agnostic and fast. LSP or call-graph precision is future work |
 | Vector DB + cross-encoder for issue linking | Forge search + LLM re-rank (v1); local hybrid index (v2) | Zero infrastructure to start; same interface later |
 | Custom PR UI panels | Terminal panel + sticky comment + optional HTML report | GitHub and GitLab have no general custom-panel API (the paper itself notes GitHub uses bot comments) |
 | Real-time toxicity/usefulness checks in the comment box | Checks at composition time in the CLI | No browser extension in v1 |

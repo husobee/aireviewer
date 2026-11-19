@@ -45,6 +45,11 @@ func (p prProvider) GetDiff(context.Context, forge.PRRef) (*forge.Diff, error) {
 	return &forge.Diff{}, nil
 }
 
+func (p prProvider) LinkedIssues(context.Context, *forge.PR) ([]forge.Issue, error) {
+	return []forge.Issue{{Ref: "o/r#7", Number: 7, Title: "Retry should back off",
+		Body: "Acceptance criteria:\n- Retry loops with exponential backoff\n- Add a New() constructor", State: "open", Source: "closing_reference"}}, nil
+}
+
 type prSource struct{ p prProvider }
 
 func (s prSource) Get(context.Context, forge.Repo) (forge.Provider, error) { return s.p, nil }
@@ -61,6 +66,9 @@ func reviewServer(t *testing.T) (*mcp.ClientSession, string, string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "CLAUDE.md"), []byte("All loops must have a body.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "svc", "use.go"), []byte("package svc\n\nvar _ = Retry(3)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	gitT(t, src, "add", "-A")
@@ -300,7 +308,7 @@ func TestHardening(t *testing.T) {
 		t.Errorf("no-match search = %+v", none)
 	}
 	ls := call[CodeListOut](t, cs, "code_list", map[string]any{"run_id": co.RunID, "prefix": "svc"})
-	if len(ls.Files) != 1 || ls.Files[0] != "svc/svc.go" {
+	if len(ls.Files) != 2 || ls.Files[0] != "svc/svc.go" {
 		t.Errorf("list = %+v", ls)
 	}
 
@@ -332,4 +340,75 @@ func slicesContains(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func TestAugmentation(t *testing.T) {
+	cs, _, head := reviewServer(t)
+	co := call[CheckoutOut](t, cs, "pr_checkout", map[string]any{"url": "https://github.com/o/r/pull/3"})
+	call[DiffmapOut](t, cs, "diffmap_build", map[string]any{"run_id": co.RunID})
+
+	is := call[IssuesOut](t, cs, "pr_issues", map[string]any{"run_id": co.RunID})
+	if is.Linkage != "linked" || len(is.Issues) != 1 || is.Issues[0].Ref != "o/r#7" {
+		t.Fatalf("issues = %+v", is)
+	}
+
+	rm := call[RepoMetricsOut](t, cs, "repo_metrics", map[string]any{"run_id": co.RunID})
+	if rm.RepoCommitsTotal != 1 || rm.Risk.Confidence != "low" || !strings.Contains(rm.Risk.ConfidenceReason, "sparse") {
+		t.Errorf("repo_metrics = %+v", rm.Risk)
+	}
+	if rm.Files["svc/svc.go"] == nil || rm.Files["svc/svc.go"].Commits365 != 1 {
+		t.Errorf("file stats = %+v", rm.Files)
+	}
+
+	sr := call[SymbolRefsOut](t, cs, "symbol_refs", map[string]any{"run_id": co.RunID})
+	var retry *SymbolRef
+	for i := range sr.Symbols {
+		if sr.Symbols[i].Symbol == "Retry" {
+			retry = &sr.Symbols[i]
+		}
+	}
+	if retry == nil || retry.RefFiles != 1 || retry.RefCount != 1 || !strings.HasPrefix(retry.Sample[0], "svc/use.go:3:") {
+		t.Errorf("symbol_refs = %+v", sr)
+	}
+
+	// An alignment report may cite the issue verbatim and recorded metrics.
+	rep := fmt.Sprintf(`{"agent":"alignment-analyst","version":1,"head_sha":%q,"status":"ok","summary":"exact",
+		"facets":{"alignment_category":"exact"},"claims":[
+		{"id":"A1","statement":"backoff criterion addressed","category":"alignment","severity":"info","confidence":"medium",
+		 "evidence":[{"kind":"issue","ref":"o/r#7","quote":"retry loops with exponential backoff"},
+		             {"kind":"code","file":"svc/svc.go","lines":[4,5]}],"anchors":["unit:svc/svc.go#Retry"]},
+		{"id":"A2","statement":"invented criterion","category":"alignment","severity":"major","confidence":"high",
+		 "evidence":[{"kind":"issue","ref":"o/r#7","quote":"must add jitter to every call"}]},
+		{"id":"A3","statement":"risk","category":"risk","severity":"info","confidence":"low",
+		 "evidence":[{"kind":"metric","name":"pr_risk","value":%d,"source":"repo_metrics"},
+		             {"kind":"metric","name":"unit:svc/svc.go#Retry.ref_files","value":1,"source":"symbol_refs"}]}]}`, head, rm.Risk.Score)
+	tok := call[SlotOut](t, cs, "report_slot", map[string]any{"run_id": co.RunID, "stage": "augmentation", "agent_name": "alignment-analyst"}).Token
+	sub := call[SubmitOut](t, cs, "report_submit", map[string]any{"run_id": co.RunID, "stage": "augmentation", "token": tok, "report": rep})
+	if !sub.Accepted || sub.Kept != 2 || len(sub.Dropped) != 1 || sub.Dropped[0].ClaimID != "A2" {
+		t.Fatalf("augmentation submit = %+v", sub)
+	}
+	// A review-stage token cannot submit to the augmentation stage.
+	rtok := call[SlotOut](t, cs, "report_slot", map[string]any{"run_id": co.RunID, "agent_name": "alignment-analyst"}).Token
+	if x := call[SubmitOut](t, cs, "report_submit", map[string]any{"run_id": co.RunID, "stage": "augmentation", "token": rtok, "report": rep}); x.Accepted {
+		t.Error("review-stage token accepted for augmentation stage")
+	}
+
+	// Augmentation claims show up in the finding views; facets survive.
+	fl := call[FindingsListOut](t, cs, "findings_list", map[string]any{"run_id": co.RunID})
+	if len(fl.Findings) != 2 || fl.Findings[0].Agent != "alignment-analyst" {
+		t.Errorf("findings = %+v", fl.Findings)
+	}
+	rs := call[ReportsOut](t, cs, "reports_get", map[string]any{"run_id": co.RunID, "stage": "augmentation"})
+	if len(rs.Reports) != 1 || rs.Reports[0].Facets["alignment_category"] != "exact" {
+		t.Errorf("augmentation reports = %+v", rs.Reports)
+	}
+	dm := call[DiffmapOut](t, cs, "diffmap_get", map[string]any{"run_id": co.RunID})
+	if dm.FindingCounts["unit:svc/svc.go#Retry"] != 1 {
+		t.Errorf("finding counts = %v", dm.FindingCounts)
+	}
+
+	rv := call[ReviewersOut](t, cs, "reviewers_suggest", map[string]any{"run_id": co.RunID})
+	if len(rv.Candidates) != 1 || rv.Candidates[0].Identity != "git:t@example.com" || rv.Candidates[0].Mapped || rv.RiskScore != rm.Risk.Score {
+		t.Errorf("reviewers = %+v", rv)
+	}
 }

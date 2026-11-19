@@ -9,7 +9,7 @@ aireviewer implements the staged, human-gated framework proposed in
 - **`/pr-create [branch]`**: PR detail generation → issue linking → automated review → fix suggestions → **you approve** → PR created → augmentation → reviewer suggestions.
 - **`/pr-review <url>`**: augmentation (alignment, risk, impact, runtime) → semantic diff-map → automated review → conversational review with explanation, toxicity and usefulness checks → **you decide and approve every post**.
 
-> **Status: M1 (pre-alpha).** `/pr-review <url>` checks out the PR/MR, builds a semantic diff-map, runs parallel code-review subagents whose findings are validated against the real code, and opens an interactive, read-only review session. Nothing is posted yet; that arrives in M3. See [SPEC.md](SPEC.md) for the design and the §17 milestones.
+> **Status: M2 (pre-alpha).** `/pr-review <url>` checks out the PR/MR, builds a semantic diff-map, and runs the paper's augmentation stage: alignment with linked issues, history-based risk and change impact. It suggests reviewers, runs parallel code-review subagents whose findings are validated against the real code, and opens an interactive, read-only review session. Nothing is posted yet; that arrives in M3. See [SPEC.md](SPEC.md) for the design and the §17 milestones.
 
 ## Principles
 
@@ -26,6 +26,7 @@ Requirements: Go 1.26+ with a C toolchain (cgo for tree-sitter), git ≥ 2.31, C
 make build                       # builds bin/aireviewer-mcp
 ./bin/aireviewer-mcp inspect https://github.com/cli/cli/pull/15094
 ./bin/aireviewer-mcp diffmap https://gitlab.com/gitlab-org/cli/-/merge_requests/1500
+./bin/aireviewer-mcp augment https://github.com/cli/cli/pull/15065   # issues, risk, impact, reviewers (no tokens)
 claude --plugin-dir .            # load the plugin from this checkout
 # then, inside Claude Code:
 /pr-review https://gitlab.com/gitlab-org/cli/-/merge_requests/1500
@@ -55,6 +56,9 @@ internal/forge/       forge-neutral model, URL/remote parsing, GitHub & GitLab a
 internal/gitrepo/     cached mirrors, PR worktrees, merge base
 internal/diffmap/     semantic diff-map (tree-sitter)
 internal/schema/      report schema + evidence validation
+internal/history/     git-history signals, risk score, expertise
+internal/reviewers/   CODEOWNERS + deterministic reviewer suggestion
+internal/config/      .aireviewer.yml (read from the merge base)
 internal/providers/   provider construction & credential resolution
 internal/runctx/      .aireviewer/runs store (cross-stage context)
 internal/mcpserver/   MCP tool registration

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	gl "gitlab.com/gitlab-org/api/client-go"
@@ -155,4 +156,67 @@ func convertDiff(f *gl.MergeRequestDiff) forge.FileChange {
 	fc.Additions, fc.Deletions = forge.CountPatch(f.Diff)
 	fc.Truncated = f.TooLarge || f.Collapsed
 	return fc
+}
+
+// ---- M2: linked issues, workload ----
+
+func convertIssue(is *gl.Issue, fallbackProject, source string) forge.Issue {
+	ref := forge.IssueRefString(fallbackProject, int(is.IID))
+	if is.References != nil && is.References.Full != "" {
+		ref = is.References.Full
+	}
+	state := is.State
+	if state == "opened" {
+		state = "open"
+	}
+	return forge.Issue{Ref: ref, Number: int(is.IID), Title: is.Title, Body: is.Description, State: state,
+		URL: is.WebURL, Labels: append([]string{}, is.Labels...), Source: source}
+}
+
+// LinkedIssues returns the issues the MR closes on merge, plus issues named
+// with closing keywords in its description.
+func (p *Provider) LinkedIssues(ctx context.Context, pr *forge.PR) ([]forge.Issue, error) {
+	out := []forge.Issue{}
+	seen := map[string]bool{}
+	closes, _, err := p.client.MergeRequests.GetIssuesClosedOnMerge(pr.Ref.Project, int64(pr.Ref.Number), &gl.GetIssuesClosedOnMergeOptions{}, gl.WithContext(ctx))
+	if err != nil {
+		return nil, wrap(err)
+	}
+	for _, is := range closes {
+		fi := convertIssue(is, pr.Ref.Project, "closing_reference")
+		seen[strings.ToLower(fi.Ref)] = true
+		out = append(out, fi)
+	}
+	for _, r := range forge.ParseClosingRefs(pr.Body) {
+		proj := r.Project
+		if proj == "" {
+			proj = pr.Ref.Project
+		}
+		if seen[strings.ToLower(forge.IssueRefString(proj, r.Number))] {
+			continue
+		}
+		is, _, err := p.client.Issues.GetIssue(proj, int64(r.Number), gl.WithContext(ctx))
+		if err != nil {
+			continue
+		}
+		fi := convertIssue(is, proj, "body_keyword")
+		if seen[strings.ToLower(fi.Ref)] {
+			continue
+		}
+		seen[strings.ToLower(fi.Ref)] = true
+		seen[strings.ToLower(forge.IssueRefString(proj, r.Number))] = true
+		out = append(out, fi)
+	}
+	return out, nil
+}
+
+// OpenReviewRequests counts open MRs on which the user is a reviewer.
+func (p *Provider) OpenReviewRequests(ctx context.Context, _ forge.Repo, user string) (int, error) {
+	opened, all := "opened", "all"
+	_, resp, err := p.client.MergeRequests.ListMergeRequests(&gl.ListMergeRequestsOptions{
+		State: &opened, Scope: &all, ReviewerUsername: &user, ListOptions: gl.ListOptions{PerPage: 1}}, gl.WithContext(ctx))
+	if err != nil {
+		return 0, wrap(err)
+	}
+	return int(resp.TotalItems), nil
 }

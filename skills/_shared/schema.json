@@ -59,6 +59,10 @@
           }
         }
       }
+    },
+    "facets": {
+      "type": "object",
+      "description": "structured, agent-specific results (e.g. alignment_category, risk_score, impacts); see each agent's prompt"
     }
   },
   "$defs": {
@@ -219,6 +223,29 @@
               },
               "minItems": 2,
               "maxItems": 2
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "ref",
+            "quote"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "issue"
+            },
+            "ref": {
+              "type": "string",
+              "description": "linked issue reference, e.g. o/r#12"
+            },
+            "quote": {
+              "type": "string",
+              "minLength": 8,
+              "description": "verbatim text from the issue's title or body (checked)"
             }
           }
         }

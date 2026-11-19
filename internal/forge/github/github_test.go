@@ -80,3 +80,37 @@ func TestNotFound(t *testing.T) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
+
+func TestLinkedIssues(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/graphql", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"repository":{"pullRequest":{"closingIssuesReferences":{"nodes":[
+			{"number":3,"title":"Retries hammer upstream","body":"AC: exponential backoff","state":"OPEN","url":"u3",
+			 "repository":{"nameWithOwner":"octo/repo"},"labels":{"nodes":[{"name":"bug"}]}}]}}}}}`)
+	})
+	mux.HandleFunc("GET /api/v3/repos/octo/repo/issues/9", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"number":9,"title":"Docs","body":"b","state":"open","html_url":"u9","labels":[]}`)
+	})
+	mux.HandleFunc("GET /api/v3/repos/octo/repo/issues/10", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"number":10,"title":"a PR","state":"open","pull_request":{"url":"x"}}`)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	p, err := New(Options{Host: "github.com", Token: "tok", BaseURL: srv.URL + "/api/v3/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := &forge.PR{Ref: ref, Body: "Fixes #3. Closes #9. Resolves #10."}
+	got, err := p.LinkedIssues(context.Background(), pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Ref != "octo/repo#3" || got[0].Source != "closing_reference" || got[0].State != "open" ||
+		got[0].Labels[0] != "bug" || got[1].Ref != "octo/repo#9" || got[1].Source != "body_keyword" {
+		t.Errorf("linked = %+v", got)
+	}
+}

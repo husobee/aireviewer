@@ -85,6 +85,7 @@ func New(cfg Config) *mcp.Server {
 		h.runPut)
 	registerReviewTools(s, h)
 	registerCodeTools(s, h)
+	registerAugmentTools(s, h)
 	return s
 }
 

@@ -80,3 +80,21 @@ func TestCountPatch(t *testing.T) {
 		t.Errorf("hunk-only: +%d -%d, want +2 -0", a, d)
 	}
 }
+
+func TestParseClosingRefs(t *testing.T) {
+	body := "This Fixes #12 and closes org/other#3.\nResolves: https://gitlab.com/grp/sub/proj/-/issues/9\n" +
+		"Mentions #44 without a keyword. fixes #12 again. Implements grp/proj#7"
+	got := ParseClosingRefs(body)
+	want := []IssueRef{{"", 12}, {"org/other", 3}, {"grp/sub/proj", 9}, {"grp/proj", 7}}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("ref %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if !(IssueRef{"", 1}).SameProject("a/b") || (IssueRef{"x/y", 1}).SameProject("a/b") {
+		t.Error("SameProject")
+	}
+}

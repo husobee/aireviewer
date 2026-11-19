@@ -32,6 +32,12 @@ func env() Env {
 			}
 			return nil, false
 		},
+		IssueText: func(ref string) (string, bool) {
+			if ref == "o/r#3" {
+				return "Retries hammer upstream\nAcceptance criteria:\n- use exponential   backoff\n- cap at 5 attempts", true
+			}
+			return "", false
+		},
 		UpstreamClaims: map[string]bool{"code-reviewer:F1": true},
 	}
 }
@@ -55,6 +61,9 @@ func TestValidateKeepsAndDrops(t *testing.T) {
 			claim("unrecorded", `{"kind":"metric","name":"risk","value":90,"source":"diffmap"}`, "")+","+
 			claim("non-runtime-trace", `{"kind":"trace","artifact":"context.json"}`, "")+","+
 			claim("trace", `{"kind":"trace","artifact":"runtime/run-1.log"}`, "")+","+
+			claim("issue-ok", `{"kind":"issue","ref":"o/r#3","quote":"Use exponential backoff"}`, "")+","+
+			claim("issue-fabricated", `{"kind":"issue","ref":"o/r#3","quote":"must support jitter"}`, "")+","+
+			claim("issue-unlinked", `{"kind":"issue","ref":"o/r#99","quote":"cap at 5 attempts"}`, "")+","+
 			claim("bad-trace", `{"kind":"trace","artifact":"runtime/nope.log"}`, ""))
 	res, err := Validate([]byte(raw), env())
 	if err != nil {
@@ -64,10 +73,10 @@ func TestValidateKeepsAndDrops(t *testing.T) {
 	for _, c := range res.Report.Claims {
 		kept = append(kept, c.ID)
 	}
-	if fmt.Sprint(kept) != "[ok old-side good-metric trace]" {
+	if fmt.Sprint(kept) != "[ok old-side good-metric trace issue-ok]" {
 		t.Errorf("kept = %v; dropped = %+v", kept, res.Dropped)
 	}
-	if len(res.Dropped) != 8 {
+	if len(res.Dropped) != 10 {
 		t.Errorf("dropped = %+v", res.Dropped)
 	}
 	ok := res.Report.Claims[0]
@@ -88,6 +97,7 @@ func TestValidateRejects(t *testing.T) {
 		"duplicate ids":  fmt.Sprintf(tmpl, claim("a", `{"kind":"code","file":"a.go","lines":[1,1]}`, "")+","+claim("a", `{"kind":"code","file":"a.go","lines":[1,1]}`, "")),
 		"stale head":     `{"agent":"x","version":1,"head_sha":"9999999","status":"ok","summary":"s","claims":[]}`,
 		"extra property": `{"agent":"x","version":1,"head_sha":"abcdef1","status":"ok","summary":"s","claims":[],"verdict":"approve"}`,
+		"short quote":    fmt.Sprintf(tmpl, claim("q", `{"kind":"issue","ref":"o/r#3","quote":"cap"}`, "")),
 	}
 	for name, raw := range cases {
 		if _, err := Validate([]byte(raw), env()); !errors.Is(err, ErrInvalid) {

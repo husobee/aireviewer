@@ -244,15 +244,18 @@ func (h *handlers) diffmapGet(_ context.Context, _ *mcp.CallToolRequest, in RunI
 		return nil, DiffmapOut{}, err
 	}
 	counts := map[string]int{}
-	reports, _ := h.acceptedReports(in.RunID, "review", m.HeadSHA)
-	for _, r := range reports {
+	for _, r := range h.findingReports(in.RunID, m.HeadSHA) {
 		for _, c := range r.Claims {
 			for _, a := range c.Anchors {
 				counts[a]++
 			}
 		}
 	}
-	return nil, DiffmapOut{RunID: in.RunID, Map: m.Summary(), FindingCounts: counts}, nil
+	sum := m.Summary()
+	if order, ok := h.riskOrder(in.RunID, m); ok {
+		sum.Order = order
+	}
+	return nil, DiffmapOut{RunID: in.RunID, Map: sum, FindingCounts: counts}, nil
 }
 
 type UnitIn struct {
@@ -306,12 +309,8 @@ func (h *handlers) diffmapUnit(_ context.Context, _ *mcp.CallToolRequest, in Uni
 		return nil, UnitOut{}, fmt.Errorf("unknown unit %q; call diffmap_get for valid ids", in.UnitID)
 	}
 	out := UnitOut{Unit: *u, Rendered: u.Render(), Findings: []AnchoredClaim{}}
-	reports, _ := h.acceptedReports(in.RunID, "review", m.HeadSHA)
 	var marks []diffmap.Mark
-	for _, r := range reports {
-		if r.Agent == "summary-generator" {
-			continue // summary claims restate reviewer claims; avoid double marks
-		}
+	for _, r := range h.findingReports(in.RunID, m.HeadSHA) {
 		for _, c := range r.Claims {
 			for _, a := range c.Anchors {
 				if a == in.UnitID {
@@ -362,10 +361,13 @@ func (h *handlers) findingGet(ctx context.Context, _ *mcp.CallToolRequest, in Fi
 	if err != nil {
 		return nil, FindingOut{}, err
 	}
+	// Synthesised claims (S1…) are addressable too, so include every report.
 	reports, err := h.acceptedReports(in.RunID, "review", st.HeadSHA)
 	if err != nil {
 		return nil, FindingOut{}, err
 	}
+	aug, _ := h.acceptedReports(in.RunID, "augmentation", st.HeadSHA)
+	reports = append(reports, aug...)
 	agentWant, idWant, qualified := strings.Cut(in.ID, ":")
 	if !qualified {
 		agentWant, idWant = "", in.ID
@@ -465,15 +467,8 @@ func (h *handlers) findingsList(_ context.Context, _ *mcp.CallToolRequest, in Ru
 	if err != nil {
 		return nil, FindingsListOut{}, err
 	}
-	reports, err := h.acceptedReports(in.RunID, "review", st.HeadSHA)
-	if err != nil {
-		return nil, FindingsListOut{}, err
-	}
 	out := FindingsListOut{HeadSHA: st.HeadSHA, Findings: []AnchoredClaim{}}
-	for _, r := range reports {
-		if r.Agent == "summary-generator" {
-			continue
-		}
+	for _, r := range h.findingReports(in.RunID, st.HeadSHA) {
 		for _, c := range r.Claims {
 			out.Findings = append(out.Findings, AnchoredClaim{Agent: r.Agent, Claim: c})
 		}
@@ -581,6 +576,7 @@ func (h *handlers) env(ctx context.Context, runID string, st *checkoutState, m *
 			return err == nil
 		},
 		Metric:         h.metricLookup(runID),
+		IssueText:      h.issueText(runID),
 		UpstreamClaims: upstream,
 	}
 }
@@ -730,4 +726,85 @@ func (h *handlers) reportSchema(context.Context, *mcp.CallToolRequest, struct{})
 	var m map[string]any
 	err := json.Unmarshal(schema.ReportSchemaJSON(), &m)
 	return nil, SchemaOut{Schema: m}, err
+}
+
+// Synthesisers restate other agents' claims; finding views skip them to
+// avoid double counting.
+var synthesisers = map[string]bool{"summary-generator": true, "findings-digest": true}
+
+// findingReports returns accepted review and augmentation reports for a head,
+// excluding synthesisers.
+func (h *handlers) findingReports(runID, head string) []schema.Report {
+	var out []schema.Report
+	for _, stage := range []string{"augmentation", "review"} {
+		rs, _ := h.acceptedReports(runID, stage, head)
+		for _, r := range rs {
+			if !synthesisers[r.Agent] {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
+func (h *handlers) issueText(runID string) func(string) (string, bool) {
+	is, ok := h.loadIssues(runID)
+	if !ok {
+		return nil
+	}
+	by := map[string]string{}
+	for _, i := range is {
+		by[strings.ToLower(i.Ref)] = i.Title + "\n" + i.Body
+	}
+	return func(ref string) (string, bool) {
+		t, ok := by[strings.ToLower(ref)]
+		return t, ok
+	}
+}
+
+// riskOrder re-orders units by file risk (repo_metrics) within the same
+// review-priority group, once risk has been computed (SPEC §7).
+func (h *handlers) riskOrder(runID string, m *diffmap.Map) ([]string, bool) {
+	raw, err := h.cfg.Store.Get(runID, "repo_metrics.json")
+	if err != nil {
+		return nil, false
+	}
+	var rm RepoMetricsOut
+	if json.Unmarshal(raw, &rm) != nil {
+		return nil, false
+	}
+	risk := map[string]int{}
+	for _, f := range rm.Risk.Files {
+		risk[f.Path] = f.Score
+	}
+	pos := map[string]int{}
+	for i, id := range m.Order {
+		pos[id] = i
+	}
+	order := append([]string{}, m.Order...)
+	group := func(u *diffmap.Unit) int {
+		switch {
+		case u.Kind == diffmap.KindBinary || u.Kind == diffmap.KindFile:
+			return 4
+		case u.Kind == diffmap.KindDoc:
+			return 3
+		case u.Kind == diffmap.KindConfig:
+			return 2
+		case u.IsTest:
+			return 1
+		}
+		return 0
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, _ := m.Unit(order[i])
+		b, _ := m.Unit(order[j])
+		if ga, gb := group(a), group(b); ga != gb {
+			return ga < gb
+		}
+		if ra, rb := risk[a.File], risk[b.File]; ra != rb {
+			return ra > rb
+		}
+		return pos[order[i]] < pos[order[j]]
+	})
+	return order, true
 }
