@@ -1,0 +1,8 @@
+{
+  "name": "aireviewer",
+  "version": "0.1.0-dev",
+  "description": "Agentic PR creation and review for GitHub and GitLab, following the staged, human-gated framework of arXiv:2605.17548.",
+  "author": { "name": "The aireviewer contributors" },
+  "license": "MIT",
+  "keywords": ["code-review", "pull-request", "merge-request", "github", "gitlab", "mcp"]
+}

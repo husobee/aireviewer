@@ -1,0 +1,11 @@
+{
+  "name": "aireviewer",
+  "owner": { "name": "The aireviewer contributors" },
+  "plugins": [
+    {
+      "name": "aireviewer",
+      "source": "./",
+      "description": "Agentic PR creation and review for GitHub and GitLab with human-in-the-loop gates."
+    }
+  ]
+}

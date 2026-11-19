@@ -1,0 +1,16 @@
+name: Forge support
+description: Request or propose an adapter for a new forge (Bitbucket, Gitea/Forgejo, Azure Repos, …)
+labels: [forge, enhancement]
+body:
+  - type: input
+    id: forge
+    attributes: { label: Forge }
+    validations: { required: true }
+  - type: textarea
+    id: api
+    attributes: { label: "API notes", description: "PR/MR, inline comment positions, suggestion syntax, review submission, linked issues." }
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contribution
+      options: [{ label: "I'm willing to implement this adapter" }]

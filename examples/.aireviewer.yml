@@ -1,0 +1,53 @@
+# Example repository configuration for aireviewer. See SPEC.md §13.
+# Most of these settings take effect in later milestones.
+forge: auto                  # auto | github | gitlab
+# gitlab_base_url: https://gitlab.example.com
+base_branch: main
+
+issue_link:
+  threshold: 0.70
+  include_closed_days: 30
+  allow_create: true
+
+policies:
+  rules:
+    - "All exported Go funcs need doc comments"
+  files: [CONTRIBUTING.md, CLAUDE.md]
+
+static_analysis:
+  - "golangci-lint run --output.json.path stdout ./..."
+
+runtime:
+  enabled: true
+  image: golang:1.26
+  setup: ["go mod download"]
+  commands: ["go build ./...", "go test ./... -json"]
+  reruns: 3
+  network: false
+  timeout_s: 900
+
+risk:
+  bugfix_keywords: [fix, bug, hotfix, regression]
+  bug_labels: [bug, incident]
+  min_history_commits: 20
+
+reviewers:
+  weights: { expertise: 0.35, experience: 0.2, ownership: 0.2, workload: 0.15, knowledge_share: 0.1 }
+  exclude: [dependabot, renovate]
+
+comments:
+  toxicity: warn             # off | warn | block
+  usefulness: warn
+  provenance_footer: true
+
+ci:
+  post_augmentation: false   # the only automated post allowed; opt-in (ADR 0003)
+
+limits:
+  max_diff_lines: 4000
+  max_parallel_agents: 6
+  lazy_fix_suggestions: true
+
+memory:
+  enabled: true
+  retention_days: 365

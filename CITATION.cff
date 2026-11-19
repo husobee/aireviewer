@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use aireviewer, please cite the software and the paper whose framework it implements."
+title: "aireviewer: agentic PR creation and review for GitHub and GitLab"
+type: software
+authors:
+  - name: "The aireviewer contributors"
+license: MIT
+version: 0.1.0-dev
+references:
+  - type: article
+    title: "Rethinking Code Review in the Age of AI: A Vision for Agentic Code Review"
+    authors:
+      - family-names: "Kamalı"
+        given-names: "Hüseyin Özgür"
+      - family-names: "Tuna"
+        given-names: "Erdem"
+      - family-names: "Haratian"
+        given-names: "Vahid"
+      - family-names: "Tüzün"
+        given-names: "Eray"
+    year: 2026
+    identifiers:
+      - type: other
+        value: "arXiv:2605.17548"
+    url: "https://arxiv.org/abs/2605.17548"

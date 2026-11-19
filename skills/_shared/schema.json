@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/husobee/aireviewer/schema/report.v1.json",
+  "title": "aireviewer agent report (v1)",
+  "description": "Common envelope every aireviewer subagent returns. Claims must carry evidence; see SPEC.md §6.",
+  "type": "object",
+  "required": ["agent", "version", "head_sha", "status", "summary", "claims"],
+  "additionalProperties": false,
+  "properties": {
+    "agent": { "type": "string" },
+    "version": { "const": 1 },
+    "head_sha": { "type": "string", "minLength": 7 },
+    "status": { "enum": ["ok", "partial", "not_applicable", "failed"] },
+    "summary": { "type": "string" },
+    "claims": { "type": "array", "items": { "$ref": "#/$defs/claim" } },
+    "contradictions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["with", "note"],
+        "additionalProperties": false,
+        "properties": { "with": { "type": "string" }, "note": { "type": "string" } }
+      }
+    }
+  },
+  "$defs": {
+    "claim": {
+      "type": "object",
+      "required": ["id", "statement", "category", "severity", "confidence", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "statement": { "type": "string" },
+        "category": {
+          "enum": ["behavioral", "interface", "operational", "alignment", "risk", "defect", "policy", "style", "security", "performance"]
+        },
+        "severity": { "enum": ["blocker", "major", "minor", "info"] },
+        "confidence": { "enum": ["high", "medium", "low"] },
+        "confidence_reason": { "type": "string" },
+        "evidence": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/evidence" } },
+        "anchors": { "type": "array", "items": { "type": "string", "pattern": "^unit:" } },
+        "proposal": { "type": "string" }
+      }
+    },
+    "evidence": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind", "file", "lines"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "code" },
+            "file": { "type": "string" },
+            "lines": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 },
+            "side": { "enum": ["old", "new"] }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "name", "value", "source"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "metric" },
+            "name": { "type": "string" },
+            "value": {},
+            "source": { "type": "string", "description": "the MCP tool that produced the metric" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "artifact"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "trace" },
+            "artifact": { "type": "string", "description": "run-context relative path" },
+            "lines": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 2, "maxItems": 2 }
+          }
+        }
+      ]
+    }
+  }
+}

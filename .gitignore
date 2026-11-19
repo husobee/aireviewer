@@ -1,0 +1,5 @@
+/bin/
+/dist/
+.aireviewer/
+*.test
+*.out
