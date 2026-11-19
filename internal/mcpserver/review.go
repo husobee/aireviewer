@@ -45,6 +45,13 @@ func registerReviewTools(s *mcp.Server, h *handlers) {
 	mcp.AddTool(s, &mcp.Tool{Name: "diffmap_unit", Annotations: ro,
 		Description: "Return one diff-map unit with numbered diff lines (old/new line numbers) and every accepted finding anchored to it."},
 		h.diffmapUnit)
+	mcp.AddTool(s, &mcp.Tool{Name: "finding_get", Annotations: ro,
+		Description: "Return one accepted finding rendered for the reviewer: header, proposal, and a highlighted Markdown diff excerpt " +
+			"(cited lines marked ▶, the finding shown inline as an @@ ▲ line) for each piece of code evidence. Print `rendered` verbatim."},
+		h.findingGet)
+	mcp.AddTool(s, &mcp.Tool{Name: "findings_list", Annotations: ro,
+		Description: "List accepted reviewer findings for the current head, most severe first, for walking through them one by one."},
+		h.findingsList)
 	mcp.AddTool(s, &mcp.Tool{Name: "report_submit", Annotations: local,
 		Description: "Submit an agent report (JSON string conforming to the aireviewer report schema v1). It is validated: schema errors reject " +
 			"the whole report; claims whose evidence cites non-existent files/lines, metrics not produced by a tool, or missing artifacts are dropped. " +
@@ -241,9 +248,34 @@ type AnchoredClaim struct {
 }
 
 type UnitOut struct {
-	Unit     diffmap.Unit    `json:"unit"`
-	Rendered string          `json:"rendered" jsonschema:"numbered diff: old-line new-line op text"`
-	Findings []AnchoredClaim `json:"findings"`
+	Unit        diffmap.Unit    `json:"unit"`
+	Rendered    string          `json:"rendered" jsonschema:"numbered diff: old-line new-line op text"`
+	Highlighted string          `json:"highlighted" jsonschema:"Markdown diff block with every finding's cited lines marked; print verbatim to the reviewer"`
+	Findings    []AnchoredClaim `json:"findings"`
+}
+
+// claimLabel is the one-line label shown next to highlighted lines.
+func claimLabel(c schema.Claim) string {
+	s := c.Statement
+	if r := []rune(s); len(r) > 90 {
+		s = string(r[:89]) + "…"
+	}
+	return fmt.Sprintf("%s %s/%s — %s", c.ID, c.Severity, c.Confidence, s)
+}
+
+// marksFor converts a claim's code evidence on a file into highlight marks.
+func marksFor(c schema.Claim, file string) []diffmap.Mark {
+	var out []diffmap.Mark
+	for _, e := range c.Evidence {
+		if e.Kind == "code" && e.File == file && len(e.Lines) == 2 {
+			side := e.Side
+			if side == "" {
+				side = "new"
+			}
+			out = append(out, diffmap.Mark{Label: claimLabel(c), Side: side, Start: e.Lines[0], End: e.Lines[1]})
+		}
+	}
+	return out
 }
 
 func (h *handlers) diffmapUnit(_ context.Context, _ *mcp.CallToolRequest, in UnitIn) (*mcp.CallToolResult, UnitOut, error) {
@@ -257,16 +289,184 @@ func (h *handlers) diffmapUnit(_ context.Context, _ *mcp.CallToolRequest, in Uni
 	}
 	out := UnitOut{Unit: *u, Rendered: u.Render(), Findings: []AnchoredClaim{}}
 	reports, _ := h.acceptedReports(in.RunID, "review", m.HeadSHA)
+	var marks []diffmap.Mark
 	for _, r := range reports {
+		if r.Agent == "summary-generator" {
+			continue // summary claims restate reviewer claims; avoid double marks
+		}
 		for _, c := range r.Claims {
 			for _, a := range c.Anchors {
 				if a == in.UnitID {
 					out.Findings = append(out.Findings, AnchoredClaim{Agent: r.Agent, Claim: c})
+					marks = append(marks, marksFor(c, u.File)...)
+					if u.OldFile != "" {
+						marks = append(marks, marksFor(c, u.OldFile)...)
+					}
 					break
 				}
 			}
 		}
 	}
+	header := fmt.Sprintf("%s  [%s, %s, +%d −%d]", u.ID, u.Kind, u.Change, u.Additions, u.Deletions)
+	out.Highlighted = diffmap.RenderHighlighted(header, u.Lines, marks)
+	return nil, out, nil
+}
+
+// ---- finding_get ----
+
+type FindingIn struct {
+	RunID string `json:"run_id"`
+	ID    string `json:"id" jsonschema:"finding id: S1 (summary), F2 if unambiguous, or agent-qualified like code-reviewer-2:F2"`
+}
+
+type FindingOut struct {
+	Agent    string       `json:"agent"`
+	Claim    schema.Claim `json:"claim"`
+	Rendered string       `json:"rendered" jsonschema:"Markdown: finding header, proposal, and a highlighted diff excerpt per piece of evidence; print verbatim"`
+}
+
+var sevRank = map[string]int{"blocker": 0, "major": 1, "minor": 2, "info": 3}
+
+// SeverityRank orders severities for walking findings (lower is more severe).
+func SeverityRank(s string) int {
+	if r, ok := sevRank[s]; ok {
+		return r
+	}
+	return 9
+}
+
+func (h *handlers) findingGet(ctx context.Context, _ *mcp.CallToolRequest, in FindingIn) (*mcp.CallToolResult, FindingOut, error) {
+	st, err := h.loadCheckout(in.RunID)
+	if err != nil {
+		return nil, FindingOut{}, err
+	}
+	m, err := h.loadMap(in.RunID)
+	if err != nil {
+		return nil, FindingOut{}, err
+	}
+	reports, err := h.acceptedReports(in.RunID, "review", st.HeadSHA)
+	if err != nil {
+		return nil, FindingOut{}, err
+	}
+	agentWant, idWant, qualified := strings.Cut(in.ID, ":")
+	if !qualified {
+		agentWant, idWant = "", in.ID
+	}
+	var hits []AnchoredClaim
+	for _, r := range reports {
+		if agentWant != "" && r.Agent != agentWant {
+			continue
+		}
+		for _, c := range r.Claims {
+			if strings.EqualFold(c.ID, idWant) {
+				hits = append(hits, AnchoredClaim{Agent: r.Agent, Claim: c})
+			}
+		}
+	}
+	switch {
+	case len(hits) == 0:
+		return nil, FindingOut{}, fmt.Errorf("no accepted finding %q for head %s", in.ID, st.HeadSHA[:7])
+	case len(hits) > 1:
+		var names []string
+		for _, h := range hits {
+			names = append(names, h.Agent+":"+h.Claim.ID)
+		}
+		return nil, FindingOut{}, fmt.Errorf("finding id %q is ambiguous; use one of %s", in.ID, strings.Join(names, ", "))
+	}
+	hit := hits[0]
+	c := hit.Claim
+	src := source{g: h.git(st.Repo), worktree: st.Worktree, base: st.MergeBase}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "**%s · %s · %s confidence** (%s, %s)  \n%s\n", c.ID, c.Severity, c.Confidence, hit.Agent, c.Category, c.Statement)
+	if c.ConfidenceReason != "" {
+		fmt.Fprintf(&b, "\n_Confidence:_ %s\n", c.ConfidenceReason)
+	}
+	if c.Proposal != "" {
+		fmt.Fprintf(&b, "\n_Proposal:_ %s\n", c.Proposal)
+	}
+	if len(c.Sources) > 0 {
+		fmt.Fprintf(&b, "\n_Sources:_ %s\n", strings.Join(c.Sources, ", "))
+	}
+	for _, e := range c.Evidence {
+		switch e.Kind {
+		case "code":
+			side := e.Side
+			if side == "" {
+				side = "new"
+			}
+			mark := diffmap.Mark{Label: claimLabel(c), Side: side, Start: e.Lines[0], End: e.Lines[1]}
+			var lines []diffmap.Line
+			header := ""
+			// Prefer the diff of the unit that actually contains a cited line,
+			// then widen to ±3 lines of context within that unit.
+			for _, u := range m.Units {
+				if u.File != e.File && u.OldFile != e.File {
+					continue
+				}
+				if diffmap.Excerpt(u.Lines, side, e.Lines[0], e.Lines[1], 0) == nil {
+					continue
+				}
+				lines, header = diffmap.Excerpt(u.Lines, side, e.Lines[0], e.Lines[1], 3), u.ID
+				break
+			}
+			if lines == nil { // unchanged code (e.g. a caller): show the file itself
+				var content []byte
+				var err error
+				if side == "old" {
+					content, err = src.Base(ctx, e.File)
+				} else {
+					content, err = src.Head(ctx, e.File)
+				}
+				if err != nil {
+					fmt.Fprintf(&b, "\n`%s:%d-%d` (%s): could not read file: %v\n", e.File, e.Lines[0], e.Lines[1], side, err)
+					continue
+				}
+				lines = diffmap.FileLines(content, side, e.Lines[0]-3, e.Lines[1]+3)
+				header = e.File + "  (unchanged code)"
+			}
+			fmt.Fprintf(&b, "\n`%s:%d-%d` (%s)\n\n%s", e.File, e.Lines[0], e.Lines[1], side, diffmap.RenderHighlighted(header, lines, []diffmap.Mark{mark}))
+		case "metric":
+			fmt.Fprintf(&b, "\n- metric `%s` = %v (from `%s`)\n", e.Name, e.Value, e.Source)
+		case "trace":
+			fmt.Fprintf(&b, "\n- trace `%s`\n", e.Artifact)
+		}
+	}
+	return nil, FindingOut{Agent: hit.Agent, Claim: c, Rendered: b.String()}, nil
+}
+
+// ---- findings_list ----
+
+type FindingsListOut struct {
+	HeadSHA  string          `json:"head_sha"`
+	Findings []AnchoredClaim `json:"findings" jsonschema:"accepted reviewer findings (excluding the summary), most severe first; walk them in this order"`
+}
+
+func (h *handlers) findingsList(_ context.Context, _ *mcp.CallToolRequest, in RunIn) (*mcp.CallToolResult, FindingsListOut, error) {
+	st, err := h.loadCheckout(in.RunID)
+	if err != nil {
+		return nil, FindingsListOut{}, err
+	}
+	reports, err := h.acceptedReports(in.RunID, "review", st.HeadSHA)
+	if err != nil {
+		return nil, FindingsListOut{}, err
+	}
+	out := FindingsListOut{HeadSHA: st.HeadSHA, Findings: []AnchoredClaim{}}
+	for _, r := range reports {
+		if r.Agent == "summary-generator" {
+			continue
+		}
+		for _, c := range r.Claims {
+			out.Findings = append(out.Findings, AnchoredClaim{Agent: r.Agent, Claim: c})
+		}
+	}
+	sort.SliceStable(out.Findings, func(i, j int) bool {
+		a, b := out.Findings[i].Claim, out.Findings[j].Claim
+		if SeverityRank(a.Severity) != SeverityRank(b.Severity) {
+			return SeverityRank(a.Severity) < SeverityRank(b.Severity)
+		}
+		return out.Findings[i].Agent+a.ID < out.Findings[j].Agent+b.ID
+	})
 	return nil, out, nil
 }
 

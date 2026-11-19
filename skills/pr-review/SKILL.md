@@ -2,7 +2,7 @@
 name: pr-review
 description: Review a GitHub pull request or GitLab merge request from its URL with the aireviewer framework — semantic diff-map, automated code review by subagents, an evidence-backed summary, and an interactive Q&A session. Use when the user gives a PR/MR link and asks for a review, or runs /pr-review <url>.
 argument-hint: <pr-or-mr-url>
-allowed-tools: mcp__plugin_aireviewer_aireviewer__pr_resolve, mcp__plugin_aireviewer_aireviewer__pr_get, mcp__plugin_aireviewer_aireviewer__pr_diff, mcp__plugin_aireviewer_aireviewer__pr_checkout, mcp__plugin_aireviewer_aireviewer__diffmap_build, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__reports_get, mcp__plugin_aireviewer_aireviewer__evidence_check, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__run_context_list
+allowed-tools: mcp__plugin_aireviewer_aireviewer__pr_resolve, mcp__plugin_aireviewer_aireviewer__pr_get, mcp__plugin_aireviewer_aireviewer__pr_diff, mcp__plugin_aireviewer_aireviewer__pr_checkout, mcp__plugin_aireviewer_aireviewer__diffmap_build, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__reports_get, mcp__plugin_aireviewer_aireviewer__findings_list, mcp__plugin_aireviewer_aireviewer__finding_get, mcp__plugin_aireviewer_aireviewer__evidence_check, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__run_context_list
 ---
 
 # /pr-review (M1: read-only, AI-assisted)
@@ -45,16 +45,24 @@ Present the following, keeping it scannable:
 2. **Findings** table: id, severity, confidence, unit, statement. Blockers and majors come first, and minors are collapsed to a count if there are more than 8.
 3. **Description check:** flag an empty or near-empty description. The paper treats missing PR details as a primary review obstacle.
 4. **Diff-map outline** in review order, one line per unit: `kind change +a −d unit-id [• n findings]`. If there are more than 30 units, show the first 30 and say how many remain.
-5. One line of next steps: *ask anything about the change, `show <unit>`, `next`, `explain <finding id>`, `look closer at <unit>`, or `done`*.
+5. One line of next steps: *`walk` to step through the findings with highlighted diffs, `show <unit>`, `next`, `F3` / `S1` to jump to a finding, ask anything about the change, `look closer at <unit>`, or `done`*.
+
+## Showing code: always use the highlighted views
+Whenever you show code from the PR, print the server-rendered Markdown **verbatim**: `finding_get` → `rendered`, and `diffmap_unit` → `highlighted`.
+- Do not re-type, trim, re-indent, summarise or wrap it in another code block. It is already a fenced ```` ```diff ```` block, which the terminal colours: green additions, red deletions, cyan `@@` lines.
+- In those blocks, `▶` in the gutter marks the lines a finding cites, and `@@ ▲ F1 major/high — …` lines show the finding inline right under its lines. The columns are: diff op, merge-base line, head line, gutter, code.
+- Add your own commentary only **after** the block, in at most 3 sentences.
 
 ## Phase 4: Interactive review loop
 Route each reviewer message as follows:
 
 | Reviewer intent | Action |
 |---|---|
-| `show <unit>` / `next` / `prev` | Call `diffmap_unit` and print `rendered` plus that unit's findings. Track the position in `order` for next/prev. |
-| A question about the code or the change | Dispatch `aireviewer:explainer` with `run_id`, `worktree`, `head_sha`, `question`, and the current `unit_id` if any. Relay the answer with its citations. |
-| `explain F3` / "why is S2 major?" | Answer from the stored claim (`reports_get`), quoting its evidence. If more depth is needed, use `explainer`. |
+| `walk` / `next finding` / `prev finding` | Call `findings_list` once (most severe first) and keep a cursor into it. For each step, call `finding_get` with the qualified id (`<agent>:<id>`), print `rendered` verbatim, then a footer: `finding k/N · next finding · show unit · explain · skip`. |
+| `F3` / `S1` / `code-reviewer-2:F3` | Call `finding_get` and print `rendered` verbatim. If the id is ambiguous, the error lists the qualified ids; ask which one is meant. |
+| `show <unit>` / `next` / `prev` | Call `diffmap_unit` and print `highlighted` verbatim. Then list that unit's findings, one line each (`id severity/confidence — statement`). Track the position in `order` for next/prev. |
+| A question about the code or the change | Dispatch `aireviewer:explainer` with `run_id`, `worktree`, `head_sha`, `question`, and the current `unit_id` if any. Relay the answer with its citations. If the answer centres on one unit, follow it with that unit's `highlighted` view. |
+| `explain F3` / "why is S2 major?" | Print `finding_get` → `rendered` first, then answer from the claim's evidence. If more depth is needed, use `explainer`. |
 | "look closer at <unit>" / "is this a bug?" | Dispatch `aireviewer:code-reviewer` with `agent_name: code-reviewer-focus-<n>` and `units: [<unit>]`, plus the reviewer's concern in the prompt. Re-run `summary-generator` afterwards. |
 | "re-run" / the head has changed | Call `pr_checkout` again. If `head_sha` changed, rebuild the diff-map and redo Phase 2. Old reports remain stored under the old SHA. |
 | Draft a comment, approve, request changes | Explain that comment drafting (with toxicity and usefulness checks and fix suggestions) and review submission arrive in **M3**, and that nothing is posted at M1. Offer to note the point in the conversation for now. |

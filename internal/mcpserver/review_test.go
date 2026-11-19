@@ -158,8 +158,57 @@ func TestReviewFlow(t *testing.T) {
 		t.Errorf("evidence = %+v", ev)
 	}
 
+	// Highlighted unit view marks the cited lines and shows the finding inline.
+	if !strings.HasPrefix(unit.Highlighted, "```diff\n") || !strings.Contains(unit.Highlighted, "▶") ||
+		!strings.Contains(unit.Highlighted, "@@ ▲ F1 minor/high — loop body is empty @@") {
+		t.Errorf("highlighted unit:\n%s", unit.Highlighted)
+	}
+
+	// finding_get renders an excerpt of the unit diff around the evidence.
+	fg := call[FindingOut](t, cs, "finding_get", map[string]any{"run_id": co.RunID, "id": "F1"})
+	if fg.Agent != "code-reviewer" || !strings.Contains(fg.Rendered, "@@ unit:svc/svc.go#Retry @@") ||
+		!strings.Contains(fg.Rendered, "for i := 0") {
+		t.Errorf("finding_get F1:\n%s", fg.Rendered)
+	}
+
+	// A second reviewer cites unchanged merge-base code. Line 1 is diff
+	// context inside the top-level unit, so it is shown from the diff. Its
+	// id collides with F1.
+	r2 := fmt.Sprintf(`{"agent":"code-reviewer-2","version":1,"head_sha":%q,"status":"ok","summary":"s","claims":[
+		{"id":"F1","statement":"package doc missing","category":"policy","severity":"major","confidence":"medium",
+		 "evidence":[{"kind":"code","file":"svc/svc.go","lines":[1,1],"side":"old"}]}]}`, head)
+	if s := call[SubmitOut](t, cs, "report_submit", map[string]any{"run_id": co.RunID, "report": r2}); s.Kept != 1 {
+		t.Fatalf("second report = %+v", s)
+	}
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "finding_get", Arguments: map[string]any{"run_id": co.RunID, "id": "F1"}})
+	if err != nil || !res.IsError {
+		t.Errorf("ambiguous F1 should error: %v %+v", err, res)
+	}
+	fg2 := call[FindingOut](t, cs, "finding_get", map[string]any{"run_id": co.RunID, "id": "code-reviewer-2:F1"})
+	if !strings.Contains(fg2.Rendered, "▶ package svc") || !strings.Contains(fg2.Rendered, "@@ ▲ F1 major/medium") {
+		t.Errorf("unchanged-code excerpt:\n%s", fg2.Rendered)
+	}
+	// Code far from any hunk falls back to the file itself.
+	r3 := fmt.Sprintf(`{"agent":"code-reviewer-3","version":1,"head_sha":%q,"status":"ok","summary":"s","claims":[
+		{"id":"F9","statement":"closing brace","category":"style","severity":"info","confidence":"low",
+		 "evidence":[{"kind":"code","file":"svc/svc.go","lines":[9,9]}]}]}`, head)
+	if s := call[SubmitOut](t, cs, "report_submit", map[string]any{"run_id": co.RunID, "report": r3}); s.Kept != 1 {
+		t.Fatalf("third report = %+v", s)
+	}
+	fg3 := call[FindingOut](t, cs, "finding_get", map[string]any{"run_id": co.RunID, "id": "F9"})
+	if !strings.Contains(fg3.Rendered, "@@ unit:svc/svc.go#New") && !strings.Contains(fg3.Rendered, "(unchanged code)") {
+		t.Errorf("F9 excerpt:\n%s", fg3.Rendered)
+	}
+	if !strings.Contains(fg3.Rendered, "▶ func New() {}") {
+		t.Errorf("F9 not highlighted:\n%s", fg3.Rendered)
+	}
+	fl := call[FindingsListOut](t, cs, "findings_list", map[string]any{"run_id": co.RunID})
+	if len(fl.Findings) != 3 || fl.Findings[0].Claim.Severity != "major" || fl.Findings[2].Claim.Severity != "info" {
+		t.Errorf("findings_list order = %+v", fl.Findings)
+	}
+
 	var sch SchemaOut
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "report_schema", Arguments: map[string]any{}})
+	res, err = cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "report_schema", Arguments: map[string]any{}})
 	if err != nil || res.IsError {
 		t.Fatalf("report_schema: %v %+v", err, res)
 	}

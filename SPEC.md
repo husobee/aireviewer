@@ -357,7 +357,8 @@ The reviewer then works in natural language. Requests are routed as follows:
 | "Elaborate F4" / "give me another fix for F4" | `code-reviewer` / `fix-suggester` |
 | "Comment on line 88: this leaks the ctx" | comment composition pipeline (§9.3) |
 | "Make this actionable: 'naming here is confusing'" | `comment-usefulness` (rewrite mode) → pipeline |
-| "Next unit" / "show unit X" | diff-map navigation (no agent) |
+| "Next unit" / "show unit X" | diff-map navigation (no agent). `diffmap_unit` → `highlighted` |
+| "walk" / "next finding" / "F3" | `findings_list` → `finding_get`: a highlighted ```diff excerpt per piece of evidence. Cited lines get a `▶` gutter, and the finding appears inline as an `@@ ▲ …` line. The server renders it and the skill prints it verbatim. |
 
 ### 9.3 Comment composition pipeline (§4.5.4–4.5.6)
 

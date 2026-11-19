@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (review walkthrough)
+- Highlighted diffs for the interactive review. `finding_get` renders a finding with a diff excerpt around each piece of code evidence, falling back to the file itself for unchanged code. `diffmap_unit` gains a `highlighted` view, and `findings_list` lists findings in severity order. In both views, cited lines get a `▶` gutter and the finding is shown inline as a coloured `@@ ▲ …` line inside a ```diff block.
+- `/pr-review` gains `walk` / `next finding` / `F3`, and always prints the server-rendered blocks verbatim.
+- `scripts/mcp.sh` rebuilds the server whenever sources are newer than the binary.
+
 ### Added (M1)
 - `pr_checkout`: cached blobless mirror per project plus a per-run worktree at the PR head. It falls back to fetching by SHA when the forge has pruned PR refs, computes the merge base against the forge-recorded base SHA (so merged PRs work), passes tokens via env rather than argv, and is immune to `url.*.insteadOf` rewrites.
 - Semantic diff-map (`diffmap_build`, `diffmap_get`, `diffmap_unit`) using tree-sitter for Go, Python, JavaScript, TypeScript/TSX, Java, Rust and Ruby, with config/doc/hunk fallbacks.
