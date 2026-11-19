@@ -88,8 +88,7 @@ This is the plugin tree inside the repo. The full open-source repo layout is in 
 
 ```
 aireviewer/
-├── .claude-plugin/plugin.json
-├── .mcp.json                       # registers aireviewer-mcp
+├── .claude-plugin/plugin.json      # manifest; declares the aireviewer-mcp server inline (no root .mcp.json, which would also load as a project-level server)
 ├── skills/
 │   ├── pr-create/SKILL.md
 │   ├── pr-review/SKILL.md
@@ -629,7 +628,6 @@ aireviewer/
 ├── .claude-plugin/
 │   ├── plugin.json                 # plugin manifest (name, version, license: MIT)
 │   └── marketplace.json            # lets users: /plugin marketplace add <org>/aireviewer
-├── .mcp.json                       # points at the aireviewer-mcp binary
 ├── skills/ …                       # §3.1
 ├── agents/ …                       # §3.1
 ├── cmd/aireviewer-mcp/main.go      # MCP server entrypoint
@@ -667,3 +665,23 @@ aireviewer/
 
 ### 20.4 Milestone adjustment
 **M0** also covers the repo hygiene above: LICENSE, README, CONTRIBUTING, CoC, SECURITY, CI with the SPDX, DCO and license-scan checks, goreleaser config, and the marketplace manifest. The repo goes public at **M1**, the first useful read-only `/pr-review`.
+
+---
+
+## 21. Cross-cutting changes: multi-PR and multi-repo (planned, after M6)
+
+**Problem.** One logical change often spans several PRs: a stacked series in one repo, or coordinated PRs across repos (API + client + infra, or a library bump plus its consumers). Reviewing each PR alone misses exactly what the paper's impact and alignment analysis is for: a contract changed in one PR and consumed in another, deploy ordering, and a requirement satisfied only by the *union* of the PRs.
+
+**Direction (to be designed, not yet committed):**
+- **Change set**: a first-class object grouping N PR refs, possibly across forges and hosts. It can be declared explicitly (`/pr-review <url> <url> …`, or a `changeset:` file) or discovered from shared issue links, matching branch names, cross-references in PR bodies, and stacked base branches.
+- **Run context**: a change-set run that owns child PR runs and keys staleness on the tuple of head SHAs.
+- **Diff-map**: a combined map across repos, with unit ids qualified by repo (`unit:<host>/<project>:<file>#<name>`) and **cross-repo edges**, e.g. a changed API or proto or OpenAPI symbol linked to its consumers in the other PRs.
+- **Augmentation**:
+  - alignment is evaluated against the *union* of PRs, so each PR may legitimately be "missing" pieces the set provides;
+  - impact analysis follows contracts across repos;
+  - a new **ordering and compatibility** check covers merge and deploy order, backward compatibility during rollout, and version pinning;
+  - runtime analysis builds the set together where feasible.
+- **Review and gates**: one panel for the set plus per-PR panels. Comments still post per PR, each gated (§4 rule 6), and the verdict is per PR, chosen by the human. The summary flags "this PR is safe only if X merges first".
+- **Creation side**: `/pr-create` across several local branches or repos produces linked PRs with cross-references and a declared merge order.
+
+**Open questions:** discovery precision versus explicit declaration; auth across multiple hosts; size and cost limits for large sets; how a partially merged set is represented.

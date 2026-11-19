@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 #
-# Launcher used by .mcp.json. Runs the prebuilt aireviewer-mcp binary from
+# Launcher used by the mcpServers entry in .claude-plugin/plugin.json. Runs the prebuilt aireviewer-mcp binary from
 # the plugin's bin/ directory, building it first from source when it is
 # missing (development installs). Release installs ship the binary.
 set -euo pipefail
