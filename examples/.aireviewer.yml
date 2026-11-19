@@ -38,7 +38,15 @@ reviewers:
 comments:
   toxicity: warn             # off | warn | block
   usefulness: warn
-  provenance_footer: true
+  provenance_footer: true    # footer with the decision-log head hash on posted reviews
+
+review:
+  require_critique: false    # require the reviewer's own note before posting ("PR Critique", paper l.1748)
+  reviewer_first: false      # hide AI findings until every unit has been viewed (automation bias)
+  low_confidence_breaker: true  # low-confidence/disputed findings need an override to be posted
+
+gate:
+  trusted_bots: []           # accounts whose posted aireviewer summaries may be imported
 
 ci:
   post_augmentation: false   # the only automated post allowed; opt-in (ADR 0003)

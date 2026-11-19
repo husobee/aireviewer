@@ -241,6 +241,21 @@ func (g *Git) Show(ctx context.Context, sha, path string) ([]byte, error) {
 	return []byte(out), nil
 }
 
+// ApplyCheck reports whether patch applies cleanly to the worktree (which is
+// checked out at the PR head). Nothing is modified.
+func (g *Git) ApplyCheck(ctx context.Context, worktree, patch string) error {
+	cmd := exec.CommandContext(ctx, "git", "apply", "--check", "--recount", "-") //nolint:gosec // fixed argv
+	cmd.Dir = worktree
+	cmd.Env = g.env()
+	cmd.Stdin = strings.NewReader(patch)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("patch does not apply to the PR head: %s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // Grep runs `git grep` against a commit (never the filesystem), returning
 // "path:line:text" lines. No match is not an error.
 func (g *Git) Grep(ctx context.Context, sha, pattern string, pathspecs []string, ignoreCase bool) ([]string, error) {

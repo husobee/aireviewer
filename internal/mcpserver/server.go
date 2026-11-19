@@ -48,6 +48,8 @@ type Config struct {
 	CacheDir string
 	// RemoteFor overrides clone URLs (tests); defaults to gitrepo.RemoteFor.
 	RemoteFor func(repo forge.Repo, token string) gitrepo.Remote
+	// Now overrides the clock (tests).
+	Now func() time.Time
 }
 
 // New builds the MCP server with all M0 tools registered.
@@ -86,6 +88,7 @@ func New(cfg Config) *mcp.Server {
 	registerReviewTools(s, h)
 	registerCodeTools(s, h)
 	registerAugmentTools(s, h)
+	registerGateTools(s, h)
 	return s
 }
 
@@ -95,6 +98,8 @@ type handlers struct {
 	cfg       Config
 	slots     slotStore
 	metricsMu sync.Mutex
+	stateMu   sync.Mutex // drafts, fixes, disputes, mode, proposals
+	logMu     sync.Mutex // decision log
 }
 
 // ---- forge_detect ----

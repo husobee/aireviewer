@@ -35,6 +35,31 @@ type Config struct {
 		MaxDiffLines      int `yaml:"max_diff_lines" json:"max_diff_lines"`
 		MaxParallelAgents int `yaml:"max_parallel_agents" json:"max_parallel_agents"`
 	} `yaml:"limits" json:"limits"`
+	Comments struct {
+		Toxicity         string `yaml:"toxicity" json:"toxicity" jsonschema:"off | warn | block"`
+		Usefulness       string `yaml:"usefulness" json:"usefulness" jsonschema:"off | warn | block"`
+		ProvenanceFooter *bool  `yaml:"provenance_footer" json:"provenance_footer"`
+	} `yaml:"comments" json:"comments"`
+	Review struct {
+		RequireCritique bool `yaml:"require_critique" json:"require_critique"`
+		ReviewerFirst   bool `yaml:"reviewer_first" json:"reviewer_first"`
+		// LowConfidenceBreaker: low-confidence or disputed findings cannot
+		// become posted comments without an explicit, logged override.
+		LowConfidenceBreaker *bool `yaml:"low_confidence_breaker" json:"low_confidence_breaker"`
+	} `yaml:"review" json:"review"`
+	Gate struct {
+		TrustedBots []string `yaml:"trusted_bots" json:"trusted_bots"`
+	} `yaml:"gate" json:"gate"`
+}
+
+// Footer reports whether to add the provenance footer (default true).
+func (c Config) Footer() bool {
+	return c.Comments.ProvenanceFooter == nil || *c.Comments.ProvenanceFooter
+}
+
+// Breaker reports whether the low-confidence circuit breaker is on (default true).
+func (c Config) Breaker() bool {
+	return c.Review.LowConfidenceBreaker == nil || *c.Review.LowConfidenceBreaker
 }
 
 // Default returns the built-in configuration.
@@ -48,6 +73,8 @@ func Default() Config {
 	c.Reviewers.Max = 5
 	c.Limits.MaxDiffLines = 4000
 	c.Limits.MaxParallelAgents = 6
+	c.Comments.Toxicity = "warn"
+	c.Comments.Usefulness = "warn"
 	return c
 }
 
@@ -85,5 +112,20 @@ func Parse(data []byte) (Config, error) {
 	if in.Limits.MaxParallelAgents > 0 {
 		c.Limits.MaxParallelAgents = in.Limits.MaxParallelAgents
 	}
+	for _, m := range []struct {
+		in  string
+		out *string
+	}{{in.Comments.Toxicity, &c.Comments.Toxicity}, {in.Comments.Usefulness, &c.Comments.Usefulness}} {
+		switch m.in {
+		case "":
+		case "off", "warn", "block":
+			*m.out = m.in
+		default:
+			return c, fmt.Errorf(".aireviewer.yml: comment check mode %q must be off, warn or block", m.in)
+		}
+	}
+	c.Comments.ProvenanceFooter = in.Comments.ProvenanceFooter
+	c.Review = in.Review
+	c.Gate = in.Gate
 	return c, nil
 }

@@ -54,10 +54,10 @@ type prSource struct{ p prProvider }
 
 func (s prSource) Get(context.Context, forge.Repo) (forge.Provider, error) { return s.p, nil }
 
-func reviewServer(t *testing.T) (*mcp.ClientSession, string, string) {
+func fixtureRepo(t *testing.T) (src, head string) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
-	src := t.TempDir()
+	src = t.TempDir()
 	gitT(t, src, "init", "-q", "-b", "main")
 	if err := os.MkdirAll(filepath.Join(src, "svc"), 0o755); err != nil {
 		t.Fatal(err)
@@ -86,14 +86,28 @@ func reviewServer(t *testing.T) (*mcp.ClientSession, string, string) {
 	}
 	gitT(t, src, "add", "-A")
 	gitT(t, src, "commit", "-q", "-m", "head")
-	head := gitT(t, src, "rev-parse", "HEAD")
+	head = gitT(t, src, "rev-parse", "HEAD")
 	gitT(t, src, "update-ref", "refs/pull/3/head", head)
 	gitT(t, src, "checkout", "-q", "main")
 
+	return src, head
+}
+
+func reviewServer(t *testing.T) (*mcp.ClientSession, string, string) {
+	t.Helper()
+	src, head := fixtureRepo(t)
+	cs, root := connectServer(t, src, prSource{prProvider{head: head}}, nil)
+	return cs, root, head
+}
+
+// connectServer starts the MCP server over the fixture repo with a provider
+// source and optional client options (e.g. an elicitation handler).
+func connectServer(t *testing.T, src string, ps ProviderSource, copts *mcp.ClientOptions) (*mcp.ClientSession, string) {
+	t.Helper()
 	root := t.TempDir()
 	srv := New(Config{
 		Version: "test", RepoRoot: root, Store: runctx.New(root), CacheDir: t.TempDir(),
-		Providers: prSource{prProvider{head: head}},
+		Providers: ps,
 		RemoteFor: func(repo forge.Repo, tok string) gitrepo.Remote {
 			return gitrepo.Remote{URL: "file://" + src, Kind: repo.Forge, Token: tok}
 		},
@@ -102,12 +116,12 @@ func reviewServer(t *testing.T) (*mcp.ClientSession, string, string) {
 	if _, err := srv.Connect(context.Background(), st, nil); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(context.Background(), ct, nil)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, copts).Connect(context.Background(), ct, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs, root, head
+	return cs, root
 }
 
 func slot(t *testing.T, cs *mcp.ClientSession, runID, agent string) string {

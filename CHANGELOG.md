@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M3: gated posting; ADR 0006)
+- Forge writes on both GitHub and GitLab:
+  - batched reviews with inline comments and suggestion blocks;
+  - reviewer requests;
+  - a sticky analysis comment;
+  - current-user identity.
+
+  On GitLab, reviews post as draft notes that are bulk-published, then approved.
+- Two-phase gate: `review_prepare`, `reviewers_prepare` and `sticky_prepare` freeze the exact content and return a preview and a hash. `proposal_submit` posts it only with the matching hash, on an unchanged head, after the **server asks the human** through MCP elicitation (SEP-2322 multi round-trip). The fallback is the client's permission prompt; `AIREVIEWER_STRICT_GATE=1` requires elicitation.
+- Comment pipeline: server-side drafts validated against diff positions; toxicity and usefulness checks bound to the comment text; fix suggestions that must apply to the head and become suggestion blocks only after reviewer approval.
+- Paper §5 mitigations:
+  - **circuit breaker:** low-confidence or disputed findings need a logged override to back a posted comment;
+  - **hash-chained decision log** with its head hash anchored in posted footers;
+  - **reviewer-first mode:** findings stay hidden until every unit has been viewed;
+  - optional **PR Critique** checkpoint;
+  - **self-review refusal.**
+- `augmentation_import`: re-uses a posted summary only from the authenticated user or trusted bots, for the same head, and re-validates every report.
+- Agents: `comment-toxicity` and `comment-usefulness` (Haiku), and `fix-suggester` (Opus).
+- `/pr-review`: drafting, checks, fixes, disputes, Gate 2, posting the summary, requesting reviewers, and `log`.
+- Config: `comments.toxicity` / `comments.usefulness` (`off | warn | block`), `comments.provenance_footer`, `review.require_critique` / `review.reviewer_first` / `review.low_confidence_breaker`, `gate.trusted_bots`.
+
 ### Added (M2: PR augmentation)
 - `pr_issues`: linked issues from GitHub `closingIssuesReferences` (GraphQL) or GitLab `closes_issues`, plus closing keywords in the PR body.
 - `repo_metrics`: deterministic history signals per changed file (commits over 30/90/365 days, bug-fix commits, authors, hotspot percentile), and a reproducible risk score with a published formula and explicit confidence. It is anchored to the merge base and works on blobless mirrors.

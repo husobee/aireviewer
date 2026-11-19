@@ -244,7 +244,11 @@ func (h *handlers) diffmapGet(_ context.Context, _ *mcp.CallToolRequest, in RunI
 		return nil, DiffmapOut{}, err
 	}
 	counts := map[string]int{}
+	hidden, _, _ := h.findingsHidden(in.RunID)
 	for _, r := range h.findingReports(in.RunID, m.HeadSHA) {
+		if hidden {
+			break
+		}
 		for _, c := range r.Claims {
 			for _, a := range c.Anchors {
 				counts[a]++
@@ -269,6 +273,7 @@ type AnchoredClaim struct {
 }
 
 type UnitOut struct {
+	Note        string          `json:"note,omitempty"`
 	Unit        diffmap.Unit    `json:"unit"`
 	Rendered    string          `json:"rendered" jsonschema:"numbered diff: old-line new-line op text"`
 	Highlighted string          `json:"highlighted" jsonschema:"Markdown diff block with every finding's cited lines marked; print verbatim to the reviewer"`
@@ -309,8 +314,14 @@ func (h *handlers) diffmapUnit(_ context.Context, _ *mcp.CallToolRequest, in Uni
 		return nil, UnitOut{}, fmt.Errorf("unknown unit %q; call diffmap_get for valid ids", in.UnitID)
 	}
 	out := UnitOut{Unit: *u, Rendered: u.Render(), Findings: []AnchoredClaim{}}
+	h.markViewed(in.RunID, in.UnitID)
+	hidden, viewed, total := h.findingsHidden(in.RunID)
 	var marks []diffmap.Mark
 	for _, r := range h.findingReports(in.RunID, m.HeadSHA) {
+		if hidden {
+			out.Note = fmt.Sprintf("reviewer-first mode: findings stay hidden until every reviewable unit has been viewed (%d/%d)", viewed, total)
+			break
+		}
 		for _, c := range r.Claims {
 			for _, a := range c.Anchors {
 				if a == in.UnitID {
@@ -368,6 +379,9 @@ func (h *handlers) findingGet(ctx context.Context, _ *mcp.CallToolRequest, in Fi
 	}
 	aug, _ := h.acceptedReports(in.RunID, "augmentation", st.HeadSHA)
 	reports = append(reports, aug...)
+	if hidden, viewed, total := h.findingsHidden(in.RunID); hidden {
+		return nil, FindingOut{}, fmt.Errorf("reviewer-first mode: view every reviewable unit first (%d/%d viewed)", viewed, total)
+	}
 	agentWant, idWant, qualified := strings.Cut(in.ID, ":")
 	if !qualified {
 		agentWant, idWant = "", in.ID
@@ -466,6 +480,9 @@ func (h *handlers) findingsList(_ context.Context, _ *mcp.CallToolRequest, in Ru
 	st, err := h.loadCheckout(in.RunID)
 	if err != nil {
 		return nil, FindingsListOut{}, err
+	}
+	if hidden, viewed, total := h.findingsHidden(in.RunID); hidden {
+		return nil, FindingsListOut{}, fmt.Errorf("reviewer-first mode: view every reviewable unit first (%d/%d viewed)", viewed, total)
 	}
 	out := FindingsListOut{HeadSHA: st.HeadSHA, Findings: []AnchoredClaim{}}
 	for _, r := range h.findingReports(in.RunID, st.HeadSHA) {
