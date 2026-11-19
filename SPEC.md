@@ -194,35 +194,61 @@ The paper (§4.3, §4.3.5) requires every agent to emit structured findings: cla
 }
 ```
 
-Validation: the orchestrator validates every subagent result against `skills/_shared/schema.json`. **Any claim whose evidence references a file or line outside the diff or repo, or a metric not produced by a tool, is dropped and logged.** This is the main defence against hallucination.
+**Validation (implemented, `internal/schema`).** Subagents submit through `report_submit`, which applies two layers of checks.
+
+1. **The whole report is rejected,** so the agent fixes it and resubmits, when:
+   - it violates the JSON Schema (`skills/_shared/schema.json`, embedded in the server);
+   - its `head_sha` is not the current PR head (stale);
+   - it has duplicate claim ids.
+2. **Individual claims are dropped,** with the reasons returned, when any evidence item fails:
+   - `code` evidence must name a file that exists on the stated side (`new` = head, `old` = merge base) with a line range inside that file;
+   - `metric` evidence must come from a tool that actually produces metrics (M1: `diffmap`, `pr_diff`);
+   - `trace` evidence must point at an artifact that exists in the run context.
+
+Unknown `anchors`, and `sources` that don't name an upstream `<agent>:<claim id>`, are stripped with a note. Accepted reports are stored at `<stage>/<head_sha>/<agent>.json`, and the dropped list next to them. `evidence_check` exposes the same checks for conversational answers (the `explainer`). This is the main defence against hallucination.
+
+Claims may carry `sources: ["<agent>:<id>", …]` so synthesising agents (the `summary-generator`) can preserve provenance.
 
 ---
 
 ## 7. Semantic diff-map
 
-This is the shared substrate for humans and agents described in §4.1 and §4.5. The deterministic MCP tool `diffmap_build(base_sha, head_sha)` produces:
+This is the shared substrate for humans and agents described in §4.1 and §4.5. It is implemented in `internal/diffmap`, using the official tree-sitter bindings (ADR 0004).
+
+**Inputs.** `pr_checkout` fetches the PR into a cached, blobless, bare mirror (`$AIREVIEWER_CACHE_DIR` or `<user cache>/aireviewer/mirrors/<host>/<project>.git`). It uses the forge PR ref (`refs/pull/N/head`, `refs/merge-requests/N/head`) and falls back to fetching the head SHA. It then checks out a detached worktree at `.aireviewer/worktrees/<run_id>`, inside the workspace, so agents can read and grep it without permission prompts; `.aireviewer/.gitignore` hides it. The merge base is computed against the base SHA the forge recorded, so merged PRs and moved base branches still yield the PR's own diff. Tokens reach git through `GIT_CONFIG_*` environment variables, never through argv or the mirror config. The exact remote URL is pinned against users' `url.*.insteadOf` rewrites.
+
+**Output.** `diffmap_build(run_id)` diffs merge base → head (`-M -U3`) and produces:
 
 ```jsonc
 {
+  "version": 1, "head_sha": "…", "merge_base": "…",
+  "files": [ { "path": "pkg/http/client.go", "old_path": "", "status": "modified", "language": "go",
+               "additions": 4, "deletions": 1, "units": ["unit:pkg/http/client.go#Client.Do"] } ],
   "units": [
     {
-      "id": "unit:pkg/http.Client.Do",
-      "kind": "function | method | class | module | config | test | hunk",
-      "file": "pkg/http/client.go",
-      "change": "added | modified | deleted | moved",
-      "old_range": [30, 58], "new_range": [30, 61],
-      "hunks": [ /* raw hunk refs */ ],
-      "symbols_touched": ["DefaultTimeout"],
-      "annotations": []          // filled by the orchestrator: claim ids from all reports
+      "id": "unit:pkg/http/client.go#Client.Do",
+      "kind": "function | method | class | module | config | doc | hunk | binary | file",
+      "name": "Client.Do", "file": "pkg/http/client.go", "language": "go",
+      "change": "added | modified | deleted | renamed",
+      "old_range": [30, 58], "new_range": [30, 61],      // definition bounds per side
+      "additions": 3, "deletions": 0, "is_test": false,
+      "lines": [ { "op": "+", "new": 41, "text": "…" }, { "op": "-", "old": 40, "text": "…" } ]
     }
   ],
-  "order": ["unit:..."]          // suggested review order: risk desc, then dependency order
+  "order": ["unit:…"]
 }
 ```
 
-- tree-sitter grammars cover the languages the repo actually uses. Unsupported files fall back to `kind: hunk`.
-- After augmentation, the orchestrator joins claims onto units through `anchors`. The result is what the paper calls a "verifiable retrieval task": every claim the reviewer sees points to a code unit and to the report that produced it.
-- **Rendering:** a terminal outline (unit → claims), plus an optional HTML report (§11.3).
+- **Unit ids:**
+  - `unit:<file>#<qualified name>` for definitions, e.g. `Client.Do` or `Store.get`;
+  - `unit:<file>#(top-level)` for code outside any definition (imports, package vars);
+  - `unit:<file>@L<n>` for hunks in unsupported languages;
+  - `unit:<file>` for config, doc, binary and rename-only files.
+- **Attribution:** each added line belongs to the innermost head-side definition containing it, and each deleted line to the innermost merge-base-side definition. Definitions present on only one side are `added` or `deleted` units.
+- **Languages (M1):** Go, Python, JavaScript, TypeScript/TSX, Java, Rust, Ruby. Other source falls back to hunk units. Files over 1 MiB skip parsing.
+- **Order:** production code, then tests, config, docs, binaries, with larger changes first within each group. M2 re-orders by risk.
+- After review, `diffmap_get` returns per-unit finding counts and `diffmap_unit` returns numbered lines plus every accepted finding anchored to the unit. This is the paper's "verifiable retrieval task": every claim the reviewer sees points to a code unit and to the report that produced it.
+- **Rendering:** a terminal outline (unit → claims), plus an optional HTML report (§11.3). For debugging there is `aireviewer-mcp diffmap <url>`.
 
 ---
 
@@ -492,7 +518,9 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `pr_resolve(url)` / `pr_find_by_branch(branch)` | URL or branch → PR identity |
 | `pr_get(id)` · `pr_diff(id)` · `pr_threads(id)` · `pr_checks(id)` | Read PR state |
 | `git_diff(base, head)` · `git_log(range)` · `git_worktree_fetch(id)` | Local git |
-| `diffmap_build(base, head)` | §7 |
+| `pr_checkout(url)` | Mirror and worktree at the PR head; merge base (§7) |
+| `diffmap_build(run_id)` · `diffmap_get(run_id)` · `diffmap_unit(run_id, unit_id)` | §7 |
+| `report_submit(run_id, report, stage?)` · `reports_get(run_id, stage?)` · `evidence_check(run_id, evidence[])` · `report_schema()` | §6 validation and storage (local disk only) |
 | `repo_metrics(paths[], windows[])` | Churn, hotspots, bug-fix history |
 | `symbol_refs(symbols[], scope)` | Callers, implementers, importers |
 | `lint_run(cmd)` | Run configured analyzers in the sandbox; return normalised findings |
@@ -533,8 +561,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 
 | M | Scope | Exit criteria |
 |---|---|---|
-| **M0** | Plugin scaffold; MCP skeleton; `forge_detect`, `pr_resolve`, `pr_get`, `pr_diff` for GitHub **and** GitLab; run-context store | `/pr-review <url>` prints PR metadata and diff stats for both forges |
-| **M1** | `diffmap_build`; `code-reviewer`; `explainer`; `summary-generator`; read-only `/pr-review` panel and Q&A | Useful read-only review session on real PRs; schema validation enforced |
+| **M0** ✅ | Plugin scaffold; MCP skeleton; `forge_detect`, `pr_resolve`, `pr_get`, `pr_diff` for GitHub **and** GitLab; run-context store | `/pr-review <url>` prints PR metadata and diff stats for both forges |
+| **M1** ✅ (agent prompts not yet evaluated) | `pr_checkout`, `diffmap_build`/`get`/`unit`, `report_submit` with evidence validation, `evidence_check`; `code-reviewer`, `explainer`, `summary-generator` subagents; `/pr-review` panel and Q&A | Useful read-only review session on real PRs; schema validation enforced |
 | **M2** | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); sticky comment with marker reuse | Augmentation reused across machines; staleness by head SHA works |
 | **M3** | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges | Posted batched review with inline suggestions on GH and GL |
 | **M4** | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion | Branch → PR with linked issue and applied fixes, human-approved |

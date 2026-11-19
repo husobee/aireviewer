@@ -11,5 +11,5 @@ Ship one MCP server, `aireviewer-mcp`, written in Go, with a forge-neutral `forg
 
 ## Consequences
 - Skills and agents are forge-agnostic. "PR" is the internal term, and user-facing text uses `Kind.Noun()` / `Abbrev()`.
-- The server is a single static binary per platform, built with goreleaser and easy to ship in the plugin and in CI images.
+- The server is a single binary per platform (cgo, see ADR 0004), built on native CI runners and easy to ship in the plugin and in CI images.
 - Adding a forge means implementing `Provider` (see CONTRIBUTING.md).

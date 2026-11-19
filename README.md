@@ -9,7 +9,7 @@ aireviewer implements the staged, human-gated framework proposed in
 - **`/pr-create [branch]`**: PR detail generation → issue linking → automated review → fix suggestions → **you approve** → PR created → augmentation → reviewer suggestions.
 - **`/pr-review <url>`**: augmentation (alignment, risk, impact, runtime) → semantic diff-map → automated review → conversational review with explanation, toxicity and usefulness checks → **you decide and approve every post**.
 
-> **Status: M0 (pre-alpha).** Only the forge layer and a read-only `/pr-review` are implemented: it shows PR/MR metadata and diff stats. See [SPEC.md](SPEC.md) for the full design and the §17 milestones.
+> **Status: M1 (pre-alpha).** `/pr-review <url>` checks out the PR/MR, builds a semantic diff-map, runs parallel code-review subagents whose findings are validated against the real code, and opens an interactive, read-only review session. Nothing is posted yet; that arrives in M3. See [SPEC.md](SPEC.md) for the design and the §17 milestones.
 
 ## Principles
 
@@ -20,11 +20,12 @@ aireviewer implements the staged, human-gated framework proposed in
 
 ## Quick start (development)
 
-Requirements: Go 1.26+, Claude Code, and optionally `gh` for GitHub auth. Docker is needed for runtime analysis from M5 onward.
+Requirements: Go 1.26+ with a C toolchain (cgo for tree-sitter), git ≥ 2.31, Claude Code, and optionally `gh` for GitHub auth. Docker is needed for runtime analysis from M5 onward.
 
 ```bash
 make build                       # builds bin/aireviewer-mcp
 ./bin/aireviewer-mcp inspect https://github.com/cli/cli/pull/15094
+./bin/aireviewer-mcp diffmap https://gitlab.com/gitlab-org/cli/-/merge_requests/1500
 claude --plugin-dir .            # load the plugin from this checkout
 # then, inside Claude Code:
 /pr-review https://gitlab.com/gitlab-org/cli/-/merge_requests/1500
@@ -44,13 +45,16 @@ export AIREVIEWER_GITLAB_HOSTS=code.example.com
 export AIREVIEWER_GITHUB_HOSTS=ghe.example.com
 ```
 
-Run artifacts are stored locally in `.aireviewer/runs/`. Add this directory to the reviewed repo's `.gitignore`.
+Run artifacts and PR worktrees live in `.aireviewer/` in the directory you run Claude Code from, which ignores itself through its own `.gitignore`. Git mirrors are cached in `$AIREVIEWER_CACHE_DIR` (default `~/.cache/aireviewer`).
 
 ## Repository layout
 
 ```
 cmd/aireviewer-mcp/   MCP server entrypoint (stdio) + `inspect` debug command
 internal/forge/       forge-neutral model, URL/remote parsing, GitHub & GitLab adapters
+internal/gitrepo/     cached mirrors, PR worktrees, merge base
+internal/diffmap/     semantic diff-map (tree-sitter)
+internal/schema/      report schema + evidence validation
 internal/providers/   provider construction & credential resolution
 internal/runctx/      .aireviewer/runs store (cross-stage context)
 internal/mcpserver/   MCP tool registration

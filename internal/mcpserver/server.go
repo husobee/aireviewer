@@ -2,10 +2,12 @@
 
 // Package mcpserver wires aireviewer's tools into an MCP server.
 //
-// M0 tool set (all read-only with respect to the forge):
+// Tools (none of them write to the forge):
 //
-//	forge_detect, pr_resolve, pr_get, pr_diff,
-//	run_context_get, run_context_put, run_context_list
+//	M0: forge_detect, pr_resolve, pr_get, pr_diff,
+//	    run_context_get, run_context_put, run_context_list
+//	M1: pr_checkout, diffmap_build, diffmap_get, diffmap_unit,
+//	    report_submit, reports_get, evidence_check, report_schema
 //
 // Forge write tools arrive in later milestones and are only ever called by
 // orchestrator skills after an explicit human confirmation (SPEC.md §4).
@@ -22,6 +24,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/husobee/aireviewer/internal/forge"
+	"github.com/husobee/aireviewer/internal/gitrepo"
 	"github.com/husobee/aireviewer/internal/runctx"
 )
 
@@ -37,6 +40,12 @@ type Config struct {
 	Hosts     forge.HostConfig
 	Providers ProviderSource
 	Store     *runctx.Store
+	// Tokens resolves forge credentials for git fetches (may be nil).
+	Tokens func(ctx context.Context, kind forge.Kind, host string) string
+	// CacheDir holds shared git mirrors.
+	CacheDir string
+	// RemoteFor overrides clone URLs (tests); defaults to gitrepo.RemoteFor.
+	RemoteFor func(repo forge.Repo, token string) gitrepo.Remote
 }
 
 // New builds the MCP server with all M0 tools registered.
@@ -71,6 +80,7 @@ func New(cfg Config) *mcp.Server {
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true},
 		Description: "Write an artifact to the local run context (.aireviewer/runs/<run_id>/<path>). Local disk only; never touches the forge."},
 		h.runPut)
+	registerReviewTools(s, h)
 	return s
 }
 

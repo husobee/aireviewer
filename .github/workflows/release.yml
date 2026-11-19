@@ -1,23 +1,59 @@
 # SPDX-License-Identifier: MIT
+# aireviewer-mcp links tree-sitter via cgo, so each platform is built on a
+# native runner (no cross-compilation), then checksummed, SBOM'd and signed.
 name: release
 on:
   push:
     tags: ["v*"]
 permissions:
-  contents: write
-  id-token: write   # keyless cosign signing
+  contents: read
 jobs:
-  goreleaser:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04,     goos: linux,   goarch: amd64, ext: "" }
+          - { os: ubuntu-24.04-arm, goos: linux,   goarch: arm64, ext: "" }
+          - { os: macos-14,         goos: darwin,  goarch: arm64, ext: "" }
+          - { os: macos-13,         goos: darwin,  goarch: amd64, ext: "" }
+          - { os: windows-2022,     goos: windows, goarch: amd64, ext: ".exe" }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
       - uses: actions/setup-go@v5
         with: { go-version-file: go.mod }
+      - name: Build
+        shell: bash
+        env: { CGO_ENABLED: "1" }
+        run: |
+          v="${GITHUB_REF_NAME}"
+          name="aireviewer-mcp_${v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "dist/$name"
+          go build -trimpath -ldflags "-s -w -X main.version=$v" -o "dist/$name/aireviewer-mcp${{ matrix.ext }}" ./cmd/aireviewer-mcp
+          cp LICENSE README.md "dist/$name/"
+          cd dist && tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with: { name: "bin-${{ matrix.goos }}-${{ matrix.goarch }}", path: "dist/*.tar.gz" }
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write   # keyless cosign
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
       - uses: sigstore/cosign-installer@v3
       - uses: anchore/sbom-action/download-syft@v0
-      - run: go run github.com/google/go-licenses/v2@latest report ./... > THIRD_PARTY_NOTICES.md
-      - uses: goreleaser/goreleaser-action@v6
-        with: { version: "~> v2", args: release --clean }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Notices, SBOM, checksums, signatures
+        run: |
+          go run github.com/google/go-licenses/v2@latest report ./... > dist/THIRD_PARTY_NOTICES.csv
+          syft dir:. -o spdx-json=dist/sbom.spdx.json
+          cd dist && sha256sum *.tar.gz THIRD_PARTY_NOTICES.csv sbom.spdx.json > checksums.txt
+          cosign sign-blob --yes --output-signature checksums.txt.sig --output-certificate checksums.txt.pem checksums.txt
+      - name: Create release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
