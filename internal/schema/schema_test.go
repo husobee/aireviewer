@@ -25,8 +25,13 @@ func env() Env {
 			}
 			return 0, fmt.Errorf("missing")
 		},
-		ArtifactExists: func(p string) bool { return p == "runtime/run-1.log" },
-		MetricSources:  map[string]bool{"diffmap": true},
+		ArtifactExists: func(p string) bool { return p == "runtime/run-1.log" || p == "context.json" },
+		Metric: func(source, name string) (any, bool) {
+			if source == "diffmap" && name == "units" {
+				return 3, true
+			}
+			return nil, false
+		},
 		UpstreamClaims: map[string]bool{"code-reviewer:F1": true},
 	}
 }
@@ -46,6 +51,9 @@ func TestValidateKeepsAndDrops(t *testing.T) {
 			claim("ghost-file", `{"kind":"code","file":"ghost.go","lines":[1,1]}`, "")+","+
 			claim("bad-metric", `{"kind":"metric","name":"churn","value":3,"source":"made_up"}`, "")+","+
 			claim("good-metric", `{"kind":"metric","name":"units","value":3,"source":"diffmap"}`, "")+","+
+			claim("wrong-value", `{"kind":"metric","name":"units","value":4,"source":"diffmap"}`, "")+","+
+			claim("unrecorded", `{"kind":"metric","name":"risk","value":90,"source":"diffmap"}`, "")+","+
+			claim("non-runtime-trace", `{"kind":"trace","artifact":"context.json"}`, "")+","+
 			claim("trace", `{"kind":"trace","artifact":"runtime/run-1.log"}`, "")+","+
 			claim("bad-trace", `{"kind":"trace","artifact":"runtime/nope.log"}`, ""))
 	res, err := Validate([]byte(raw), env())
@@ -59,7 +67,7 @@ func TestValidateKeepsAndDrops(t *testing.T) {
 	if fmt.Sprint(kept) != "[ok old-side good-metric trace]" {
 		t.Errorf("kept = %v; dropped = %+v", kept, res.Dropped)
 	}
-	if len(res.Dropped) != 5 {
+	if len(res.Dropped) != 8 {
 		t.Errorf("dropped = %+v", res.Dropped)
 	}
 	ok := res.Report.Claims[0]

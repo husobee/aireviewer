@@ -108,8 +108,9 @@ type Env struct {
 	LineCount func(side, path string) (int, error)
 	// ArtifactExists reports whether a run-context relative path exists.
 	ArtifactExists func(path string) bool
-	// MetricSources is the set of tool names allowed as metric sources.
-	MetricSources map[string]bool
+	// Metric returns the value a tool recorded for (source, name), if any.
+	// Metric evidence is accepted only when its value equals the recorded one.
+	Metric func(source, name string) (any, bool)
 	// UpstreamClaims is the set of claim ids that synthesising agents may
 	// cite in "sources".
 	UpstreamClaims map[string]bool
@@ -188,6 +189,24 @@ func Validate(raw []byte, env Env) (*Result, error) {
 	return res, nil
 }
 
+// sameJSON compares two values by their JSON encoding after normalising
+// numbers (so int 3 and float64 3 are equal).
+func sameJSON(a, b any) bool {
+	norm := func(v any) string {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		var x any
+		if json.Unmarshal(raw, &x) != nil {
+			return string(raw)
+		}
+		out, _ := json.Marshal(x)
+		return string(out)
+	}
+	return norm(a) == norm(b)
+}
+
 func shaMatch(a, b string) bool {
 	if len(a) < 7 || len(b) < 7 {
 		return false
@@ -216,10 +235,20 @@ func checkEvidence(e Evidence, env Env) string {
 			return fmt.Sprintf("lines %v exceed %q length (%d lines on the %s side)", e.Lines, e.File, n, side)
 		}
 	case "metric":
-		if !env.MetricSources[e.Source] {
-			return fmt.Sprintf("metric source %q is not a tool that produces metrics", e.Source)
+		if env.Metric == nil {
+			return fmt.Sprintf("metric %s:%s cannot be verified (no metrics recorded)", e.Source, e.Name)
+		}
+		want, ok := env.Metric(e.Source, e.Name)
+		if !ok {
+			return fmt.Sprintf("metric %q was not recorded by tool %q", e.Name, e.Source)
+		}
+		if !sameJSON(want, e.Value) {
+			return fmt.Sprintf("metric %s:%s value %v does not match the recorded value %v", e.Source, e.Name, e.Value, want)
 		}
 	case "trace":
+		if !strings.HasPrefix(e.Artifact, "runtime/") {
+			return fmt.Sprintf("trace artifact %q must be a runtime/ execution artifact", e.Artifact)
+		}
 		if env.ArtifactExists == nil || !env.ArtifactExists(e.Artifact) {
 			return fmt.Sprintf("trace artifact %q not found in the run context", e.Artifact)
 		}

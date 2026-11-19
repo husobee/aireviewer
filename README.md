@@ -45,7 +45,7 @@ export AIREVIEWER_GITLAB_HOSTS=code.example.com
 export AIREVIEWER_GITHUB_HOSTS=ghe.example.com
 ```
 
-Run artifacts and PR worktrees live in `.aireviewer/` in the directory you run Claude Code from, which ignores itself through its own `.gitignore`. Git mirrors are cached in `$AIREVIEWER_CACHE_DIR` (default `~/.cache/aireviewer`).
+Run artifacts (diff-maps, validated reports, notes) live in `.aireviewer/` in the directory you run Claude Code from, which ignores itself through its own `.gitignore`. Git mirrors and PR checkouts are cached outside the workspace in `$AIREVIEWER_CACHE_DIR` (default `~/.cache/aireviewer`). Agents read PR code only through git objects (ADR 0005), so PR files are never loaded as instructions.
 
 ## Repository layout
 

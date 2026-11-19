@@ -18,7 +18,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -78,15 +80,21 @@ func New(cfg Config) *mcp.Server {
 		h.runList)
 	mcp.AddTool(s, &mcp.Tool{Name: "run_context_put",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true},
-		Description: "Write an artifact to the local run context (.aireviewer/runs/<run_id>/<path>). Local disk only; never touches the forge."},
+		Description: "Write a note to the local run context (.aireviewer/runs/<run_id>/<path>). Only paths under notes/ or ending in .md are " +
+			"writable: reports, diff-maps, metrics and checkout state are written by their own tools and cannot be overwritten. Local disk only."},
 		h.runPut)
 	registerReviewTools(s, h)
+	registerCodeTools(s, h)
 	return s
 }
 
 func boolPtr(b bool) *bool { return &b }
 
-type handlers struct{ cfg Config }
+type handlers struct {
+	cfg       Config
+	slots     slotStore
+	metricsMu sync.Mutex
+}
 
 // ---- forge_detect ----
 
@@ -230,6 +238,10 @@ func (h *handlers) prDiff(ctx context.Context, _ *mcp.CallToolRequest, in PRDiff
 		return nil, PRDiffOut{}, fmt.Errorf("save diff: %w", err)
 	}
 
+	if err := h.recordMetrics(r.RunID, "pr_diff", map[string]any{
+		"files": d.Stats.Files, "additions": d.Stats.Additions, "deletions": d.Stats.Deletions}); err != nil {
+		return nil, PRDiffOut{}, err
+	}
 	limit := in.MaxPatchBytes
 	if limit <= 0 {
 		limit = 20000
@@ -296,7 +308,21 @@ type RunPutOut struct {
 	Path string `json:"path"`
 }
 
+// writableNote reports whether run_context_put may write rel. Everything
+// that other tools trust (reports, diff-map, metrics, checkout and PR
+// context) is excluded so validation cannot be bypassed.
+func writableNote(rel string) bool {
+	clean := path.Clean(strings.ReplaceAll(rel, "\\", "/"))
+	if strings.HasPrefix(clean, "notes/") {
+		return true
+	}
+	return strings.HasSuffix(clean, ".md") && !strings.HasPrefix(path.Base(clean), ".")
+}
+
 func (h *handlers) runPut(_ context.Context, _ *mcp.CallToolRequest, in RunPutIn) (*mcp.CallToolResult, RunPutOut, error) {
+	if !writableNote(in.Path) {
+		return nil, RunPutOut{}, fmt.Errorf("path %q is not writable: run_context_put only writes notes/ or *.md files", in.Path)
+	}
 	p, err := h.cfg.Store.Put(in.RunID, in.Path, []byte(in.Content))
 	return nil, RunPutOut{Path: p}, err
 }

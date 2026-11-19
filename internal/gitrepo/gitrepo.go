@@ -241,6 +241,52 @@ func (g *Git) Show(ctx context.Context, sha, path string) ([]byte, error) {
 	return []byte(out), nil
 }
 
+// Grep runs `git grep` against a commit (never the filesystem), returning
+// "path:line:text" lines. No match is not an error.
+func (g *Git) Grep(ctx context.Context, sha, pattern string, pathspecs []string, ignoreCase bool) ([]string, error) {
+	args := []string{"grep", "-n", "-I", "-E", "--no-color", "--full-name"}
+	if ignoreCase {
+		args = append(args, "-i")
+	}
+	args = append(args, "-e", pattern, sha, "--")
+	args = append(args, pathspecs...)
+	out, err := g.Run(ctx, "", args...)
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 1 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var lines []string
+	prefix := sha + ":"
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if l != "" {
+			lines = append(lines, strings.TrimPrefix(l, prefix))
+		}
+	}
+	return lines, nil
+}
+
+// LsTree lists file paths in a commit under an optional directory prefix.
+func (g *Git) LsTree(ctx context.Context, sha, prefix string) ([]string, error) {
+	args := []string{"-c", "core.quotePath=false", "ls-tree", "-r", "--name-only", sha}
+	if prefix != "" {
+		args = append(args, "--", prefix)
+	}
+	out, err := g.Run(ctx, "", args...)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if l != "" {
+			files = append(files, l)
+		}
+	}
+	return files, nil
+}
+
 // CacheDir returns the cache root: $AIREVIEWER_CACHE_DIR or <user cache>/aireviewer.
 func CacheDir() (string, error) {
 	if d := os.Getenv("AIREVIEWER_CACHE_DIR"); d != "" {

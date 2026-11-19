@@ -24,16 +24,13 @@ import (
 	"github.com/husobee/aireviewer/internal/schema"
 )
 
-// M1 metric sources: tools whose outputs may be cited as metric evidence.
-var metricSources = map[string]bool{"diffmap": true, "pr_diff": true}
-
 func registerReviewTools(s *mcp.Server, h *handlers) {
 	ro := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	local := &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: boolPtr(false), IdempotentHint: true}
 
 	mcp.AddTool(s, &mcp.Tool{Name: "pr_checkout", Annotations: local,
-		Description: "Fetch the PR/MR head into a cached local mirror and check it out as a detached worktree under " +
-			".aireviewer/worktrees/<run_id> so its code can be read and searched. Computes the merge base. Never pushes or writes to the forge."},
+		Description: "Fetch the PR/MR head into a cached local mirror (outside the workspace) and compute the merge base. " +
+			"Read PR code with code_read / code_search / code_list, never directly from disk. Never pushes or writes to the forge."},
 		h.prCheckout)
 	mcp.AddTool(s, &mcp.Tool{Name: "diffmap_build", Annotations: local,
 		Description: "Build the semantic diff-map for a checked-out run: the diff (merge base → head) grouped into logical units " +
@@ -52,10 +49,15 @@ func registerReviewTools(s *mcp.Server, h *handlers) {
 	mcp.AddTool(s, &mcp.Tool{Name: "findings_list", Annotations: ro,
 		Description: "List accepted reviewer findings for the current head, most severe first, for walking through them one by one."},
 		h.findingsList)
+	mcp.AddTool(s, &mcp.Tool{Name: "report_slot", Annotations: local,
+		Description: "Orchestrator only: reserve a report slot for one subagent dispatch and get its submit token. " +
+			"Pass agent_name and token to exactly that subagent; report_submit rejects reports without the matching token."},
+		h.reportSlot)
 	mcp.AddTool(s, &mcp.Tool{Name: "report_submit", Annotations: local,
 		Description: "Submit an agent report (JSON string conforming to the aireviewer report schema v1). It is validated: schema errors reject " +
 			"the whole report; claims whose evidence cites non-existent files/lines, metrics not produced by a tool, or missing artifacts are dropped. " +
-			"Returns what was kept and why anything was dropped so you can fix and resubmit. Saves to the local run context only."},
+			"Requires the submit token your orchestrator gave you. Returns what was kept and why anything was dropped so you can fix and resubmit. " +
+			"Saves to the local run context only."},
 		h.reportSubmit)
 	mcp.AddTool(s, &mcp.Tool{Name: "reports_get", Annotations: ro,
 		Description: "Return all accepted reports for the current PR head in a stage (default review)."},
@@ -128,7 +130,7 @@ func ensureWorkspaceIgnore(root string) error {
 
 type CheckoutOut struct {
 	ResolveOut
-	Worktree   string `json:"worktree" jsonschema:"absolute path of the PR head checkout; read and grep code here"`
+	Worktree   string `json:"worktree" jsonschema:"cache path of the PR checkout (internal); read code with code_read/code_search, not from disk"`
 	HeadSHA    string `json:"head_sha"`
 	MergeBase  string `json:"merge_base"`
 	BaseBranch string `json:"base_branch"`
@@ -155,7 +157,11 @@ func (h *handlers) prCheckout(ctx context.Context, _ *mcp.CallToolRequest, in UR
 	if err := ensureWorkspaceIgnore(h.cfg.RepoRoot); err != nil {
 		return nil, CheckoutOut{}, err
 	}
-	wt := filepath.Join(h.cfg.RepoRoot, ".aireviewer", "worktrees", r.RunID)
+	// The worktree only hydrates blobs in the blobless mirror. It lives in the
+	// cache, outside the workspace, so PR-controlled files (nested CLAUDE.md,
+	// skills, symlinks) are never in a place Claude Code reads on its own.
+	// All code access goes through git objects (code_read/search/list).
+	wt := filepath.Join(h.cfg.CacheDir, "worktrees", r.RunID)
 	co, err := h.git(r.Ref.Repo).Prepare(ctx, pr, wt)
 	if err != nil {
 		return nil, CheckoutOut{}, fmt.Errorf("checkout %s %s: %w", r.Abbrev, r.Short, err)
@@ -175,17 +181,17 @@ type RunIn struct {
 	RunID string `json:"run_id"`
 }
 
+// source reads file content from git objects at the head and merge-base
+// commits. It never touches the filesystem, so symlinks or files planted by a
+// PR cannot redirect reads outside the repository.
 type source struct {
-	g        *gitrepo.Git
-	worktree string
-	base     string
+	g    *gitrepo.Git
+	head string
+	base string
 }
 
-func (s source) Head(_ context.Context, p string) ([]byte, error) {
-	if !filepath.IsLocal(p) {
-		return nil, fmt.Errorf("path %q escapes the worktree", p)
-	}
-	return os.ReadFile(filepath.Join(s.worktree, filepath.FromSlash(p))) //nolint:gosec // confined by IsLocal
+func (s source) Head(ctx context.Context, p string) ([]byte, error) {
+	return s.g.Show(ctx, s.head, p)
 }
 
 func (s source) Base(ctx context.Context, p string) ([]byte, error) {
@@ -209,12 +215,24 @@ func (h *handlers) diffmapBuild(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, DiffmapOut{}, err
 	}
-	m, err := diffmap.Build(ctx, diffmap.ParseGitDiff(out), source{g: g, worktree: st.Worktree, base: st.MergeBase}, st.HeadSHA, st.MergeBase)
+	m, err := diffmap.Build(ctx, diffmap.ParseGitDiff(out), source{g: g, head: st.HeadSHA, base: st.MergeBase}, st.HeadSHA, st.MergeBase)
 	if err != nil {
 		return nil, DiffmapOut{}, err
 	}
 	data, _ := json.Marshal(m)
 	if _, err := h.cfg.Store.Put(in.RunID, "diffmap.json", data); err != nil {
+		return nil, DiffmapOut{}, err
+	}
+	kv := map[string]any{"units": len(m.Units), "files": len(m.Files)}
+	add, del := 0, 0
+	for _, u := range m.Units {
+		add += u.Additions
+		del += u.Deletions
+		kv[u.ID+".additions"] = u.Additions
+		kv[u.ID+".deletions"] = u.Deletions
+	}
+	kv["additions"], kv["deletions"] = add, del
+	if err := h.recordMetrics(in.RunID, "diffmap", kv); err != nil {
 		return nil, DiffmapOut{}, err
 	}
 	return nil, DiffmapOut{RunID: in.RunID, Map: m.Summary()}, nil
@@ -375,7 +393,7 @@ func (h *handlers) findingGet(ctx context.Context, _ *mcp.CallToolRequest, in Fi
 	}
 	hit := hits[0]
 	c := hit.Claim
-	src := source{g: h.git(st.Repo), worktree: st.Worktree, base: st.MergeBase}
+	src := source{g: h.git(st.Repo), head: st.HeadSHA, base: st.MergeBase}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "**%s · %s · %s confidence** (%s, %s)  \n%s\n", c.ID, c.Severity, c.Confidence, hit.Agent, c.Category, c.Statement)
@@ -494,7 +512,8 @@ func (h *handlers) acceptedReports(runID, stage, head string) ([]schema.Report, 
 	prefix := stage + "/" + head + "/"
 	var out []schema.Report
 	for _, p := range paths {
-		if !strings.HasPrefix(p, prefix) || strings.HasSuffix(p, ".dropped.json") || path.Dir(p) != strings.TrimSuffix(prefix, "/") {
+		if !strings.HasPrefix(p, prefix) || !strings.HasSuffix(p, ".json") || strings.HasSuffix(p, ".dropped.json") ||
+			path.Dir(p) != strings.TrimSuffix(prefix, "/") {
 			continue
 		}
 		raw, err := h.cfg.Store.Get(runID, p)
@@ -523,7 +542,7 @@ func countLines(b []byte) int {
 
 func (h *handlers) env(ctx context.Context, runID string, st *checkoutState, m *diffmap.Map, stage, selfAgent string) schema.Env {
 	g := h.git(st.Repo)
-	src := source{g: g, worktree: st.Worktree, base: st.MergeBase}
+	src := source{g: g, head: st.HeadSHA, base: st.MergeBase}
 	cache := map[string]int{}
 	upstream := map[string]bool{}
 	if reports, err := h.acceptedReports(runID, stage, st.HeadSHA); err == nil {
@@ -561,15 +580,17 @@ func (h *handlers) env(ctx context.Context, runID string, st *checkoutState, m *
 			_, err := h.cfg.Store.Get(runID, p)
 			return err == nil
 		},
-		MetricSources:  metricSources,
+		Metric:         h.metricLookup(runID),
 		UpstreamClaims: upstream,
 	}
 }
 
 type SubmitIn struct {
-	RunID  string `json:"run_id"`
-	Stage  string `json:"stage,omitempty" jsonschema:"creation, review (default) or augmentation"`
-	Report string `json:"report" jsonschema:"the report as a JSON string (schema: report_schema)"`
+	RunID    string `json:"run_id"`
+	Stage    string `json:"stage,omitempty" jsonschema:"creation, review (default) or augmentation"`
+	Token    string `json:"token,omitempty" jsonschema:"submit token from your orchestrator (report_slot); required"`
+	Report   string `json:"report" jsonschema:"the report as a JSON string (schema: report_schema)"`
+	Markdown string `json:"markdown,omitempty" jsonschema:"optional human-readable rendering (e.g. the summary panel), stored next to the report"`
 }
 
 type SubmitOut struct {
@@ -610,6 +631,10 @@ func (h *handlers) reportSubmit(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if agent == "" {
 		return nil, SubmitOut{Accepted: false, Rejection: "agent name is empty", Dropped: []schema.Dropped{}, Notes: []string{}}, nil
 	}
+	if !h.checkSlot(in.RunID, stage, st.HeadSHA, agent, in.Token) {
+		return nil, SubmitOut{Accepted: false, Rejection: fmt.Sprintf("no report slot for agent %q with this token; "+
+			"use exactly the agent_name and token your orchestrator gave you", agent), Dropped: []schema.Dropped{}, Notes: []string{}}, nil
+	}
 	base := stage + "/" + st.HeadSHA + "/" + agent
 	data, _ := json.MarshalIndent(res.Report, "", "  ")
 	p, err := h.cfg.Store.Put(in.RunID, base+".json", data)
@@ -619,6 +644,11 @@ func (h *handlers) reportSubmit(ctx context.Context, _ *mcp.CallToolRequest, in 
 	dropped, _ := json.MarshalIndent(res, "", "  ")
 	if _, err := h.cfg.Store.Put(in.RunID, base+".dropped.json", dropped); err != nil {
 		return nil, SubmitOut{}, err
+	}
+	if in.Markdown != "" {
+		if _, err := h.cfg.Store.Put(in.RunID, base+".md", []byte(in.Markdown)); err != nil {
+			return nil, SubmitOut{}, err
+		}
 	}
 	return nil, SubmitOut{Path: p, Kept: len(res.Report.Claims), Dropped: res.Dropped, Notes: res.Notes, Accepted: true}, nil
 }

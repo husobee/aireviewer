@@ -19,6 +19,7 @@ aireviewer reads untrusted content (PR/MR text, comments and code), passes it to
 - **Sandbox escape or secret exposure** in runtime analysis (`sandbox_run`): host filesystem access, network egress when disabled, or tokens visible inside the container.
 - **Credential leakage**: tokens written to run artifacts, logs, posted comments, or sent to unintended hosts.
 - **Path traversal** in the run-context store or other file-writing tools.
+- **Confinement bypasses**: reading outside a PR's git objects through the `code_*` tools, forging or overwriting a report without a valid submit token, or getting PR-controlled files loaded by Claude Code as instructions (ADR 0005).
 - **Exfiltration** of private repository content to anywhere other than the configured model provider.
 
 ## Out of scope

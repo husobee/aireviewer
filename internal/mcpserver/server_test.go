@@ -128,8 +128,8 @@ func TestPRFlowGitLab(t *testing.T) {
 
 func TestRunContextRoundTrip(t *testing.T) {
 	cs, _ := connect(t)
-	call[RunPutOut](t, cs, "run_context_put", map[string]any{"run_id": "r1", "path": "review/x/findings.json", "content": "[]"})
-	got := call[RunGetOut](t, cs, "run_context_get", map[string]any{"run_id": "r1", "path": "review/x/findings.json"})
+	call[RunPutOut](t, cs, "run_context_put", map[string]any{"run_id": "r1", "path": "notes/findings.json", "content": "[]"})
+	got := call[RunGetOut](t, cs, "run_context_get", map[string]any{"run_id": "r1", "path": "notes/findings.json"})
 	if got.Content != "[]" {
 		t.Errorf("content = %q", got.Content)
 	}

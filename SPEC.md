@@ -53,7 +53,7 @@ The paper's core idea is that **context carries across stage boundaries**. Creat
 
 **Key constraint: orchestrators are skills, not subagents.** Claude Code subagents cannot spawn other subagents. The paper's three orchestrators (PR Creation Agent, PR Augmentation Agent and PR Review Agent) each govern subordinate agents, so they must run in the main session as skills that dispatch subagents. This works in our favour: the main session is the natural-language interface the paper describes, used by the author during creation and by the reviewer during review.
 
-**Key constraint: deterministic work goes to tools, judgment goes to agents.** Computing churn, building the diff-map, finding callers, running code and calling forge APIs are MCP tools. LLM agents interpret their outputs. This addresses the paper's §5.1 concerns about hallucination and cascading errors: numbers and locations are never invented by a model.
+**Key constraint: deterministic work goes to tools, judgment goes to agents.** Computing churn, building the diff-map, finding callers, running code and calling forge APIs are MCP tools. LLM agents interpret their outputs. This addresses the paper's §5.1 concerns about hallucination and cascading errors. The server verifies every cited location, and every metric value against what a tool recorded (§6). It cannot verify that a claim's *statement* is true of the lines it cites, so that judgement stays with the human reviewer.
 
 ---
 
@@ -126,6 +126,9 @@ aireviewer/
 The paper requires explicit HITL quality gates to counter automation bias. The system enforces them structurally:
 
 1. **Subagents get read-only tools only.** Write tools (`pr_create`, `issue_create`, `review_submit`, `reviewers_request`, `git_apply_patch`) are allow-listed only in orchestrator skills, and each call happens after an explicit user confirmation step written into the skill.
+   - Subagents have **no filesystem tools** (no Read, Grep or Glob). They reach PR code only through `code_read` / `code_search` / `code_list`, which read git objects at the head or merge-base commit (ADR 0005).
+   - Their only write is `report_submit`, and it needs a per-dispatch **submit token** that the orchestrator obtains with `report_slot` and hands to exactly one subagent. One agent therefore cannot write or overwrite another's report.
+   - `run_context_put` can only write `notes/` or `*.md` files, so it cannot forge reports, the diff-map, metrics or checkout state.
 2. **Gate 1, Author verification (§4.2.5).** Nothing is pushed or created until the author has approved the title, description, issue links, any new issue, and each patch.
 3. **Gate 2, Reviewer decision (§4.5.6).** All comments are queued locally as a *pending review*. Nothing is posted until the reviewer chooses Approve, Request changes or Comment. Fix patches are forwarded to the author as suggestions **only on reviewer approval** of that patch.
 4. **The agent never chooses the verdict.** It may recommend one, with reasons, but the reviewer must pick it.
@@ -157,7 +160,7 @@ Every run is keyed by `(forge, project, pr_number | branch, head_sha)` and store
 <!-- aireviewer:v1 run=<id> head=<sha> -->
 ```
 
-`/pr-review` on another machine can then reuse existing augmentation instead of recomputing it. **Staleness rule:** augmentation is valid only for the exact `head_sha`. On a new push, the alignment, risk and impact reports are recomputed. Runtime results are recomputed only when files they cover have changed.
+`/pr-review` on another machine can then reuse existing augmentation instead of recomputing it. **Staleness rule:** augmentation is valid only for the exact `head_sha`. On a new push, every report is recomputed, runtime results included. Reusing runtime results across SHAs is unsafe because of transitive effects.
 
 ---
 
@@ -201,8 +204,10 @@ The paper (§4.3, §4.3.5) requires every agent to emit structured findings: cla
    - it has duplicate claim ids.
 2. **Individual claims are dropped,** with the reasons returned, when any evidence item fails:
    - `code` evidence must name a file that exists on the stated side (`new` = head, `old` = merge base) with a line range inside that file;
-   - `metric` evidence must come from a tool that actually produces metrics (M1: `diffmap`, `pr_diff`);
-   - `trace` evidence must point at an artifact that exists in the run context.
+   - `metric` evidence must name a metric a tool recorded in `metrics.json` (written only by tools), and its **value must equal the recorded one**;
+   - `trace` evidence must point at an existing `runtime/` execution artifact.
+
+   **Limit:** the server verifies that evidence *exists*, not that the claim's statement is true of it. Semantic relevance is left to the human reviewer, helped by the highlighted views.
 
 Unknown `anchors`, and `sources` that don't name an upstream `<agent>:<claim id>`, are stripped with a note. Accepted reports are stored at `<stage>/<head_sha>/<agent>.json`, and the dropped list next to them. `evidence_check` exposes the same checks for conversational answers (the `explainer`). This is the main defence against hallucination.
 
@@ -214,7 +219,7 @@ Claims may carry `sources: ["<agent>:<id>", …]` so synthesising agents (the `s
 
 This is the shared substrate for humans and agents described in §4.1 and §4.5. It is implemented in `internal/diffmap`, using the official tree-sitter bindings (ADR 0004).
 
-**Inputs.** `pr_checkout` fetches the PR into a cached, blobless, bare mirror (`$AIREVIEWER_CACHE_DIR` or `<user cache>/aireviewer/mirrors/<host>/<project>.git`). It uses the forge PR ref (`refs/pull/N/head`, `refs/merge-requests/N/head`) and falls back to fetching the head SHA. It then checks out a detached worktree at `.aireviewer/worktrees/<run_id>`, inside the workspace, so agents can read and grep it without permission prompts; `.aireviewer/.gitignore` hides it. The merge base is computed against the base SHA the forge recorded, so merged PRs and moved base branches still yield the PR's own diff. Tokens reach git through `GIT_CONFIG_*` environment variables, never through argv or the mirror config. The exact remote URL is pinned against users' `url.*.insteadOf` rewrites.
+**Inputs.** `pr_checkout` fetches the PR into a cached, blobless, bare mirror (`$AIREVIEWER_CACHE_DIR` or `<user cache>/aireviewer/mirrors/<host>/<project>.git`). It uses the forge PR ref (`refs/pull/N/head`, `refs/merge-requests/N/head`) and falls back to fetching the head SHA. It checks out a detached worktree in the cache (`<cache>/worktrees/<run_id>`), **outside the workspace**. Its only purpose is to hydrate the blobless mirror's objects in one batch. All code access, by the diff-map and by agents, reads git objects at the head or merge-base commit, never the filesystem. A PR's symlinks or nested `CLAUDE.md` and skill files therefore can never redirect reads or be loaded by Claude Code (ADR 0005). The merge base is computed against the base SHA the forge recorded, so merged PRs and moved base branches still yield the PR's own diff. Tokens reach git through `GIT_CONFIG_*` environment variables, never through argv or the mirror config. The exact remote URL is pinned against users' `url.*.insteadOf` rewrites.
 
 **Output.** `diffmap_build(run_id)` diffs merge base → head (`-M -U3`) and produces:
 
@@ -324,10 +329,10 @@ Requests the paper supports (§4.2.5) all go through the main session, which re-
 
 | Step | What happens | Agents / tools |
 |---|---|---|
-| 1. Resolve | Parse the URL (`github.com/o/r/pull/N`, `gitlab.example.com/g/sg/p/-/merge_requests/N`). Fetch metadata, base/head SHAs, the diff, linked issues (GitHub `closingIssuesReferences`; GitLab `closes_issues`), existing threads, and CI status. Fetch the head into a local worktree, which `symbol_refs` and runtime analysis need. **If the current user is the PR author, warn** that the forge will not accept approval from them. Suggest `/pr-create`'s re-review, or carry on in comment-only mode. | MCP `pr_resolve`, `pr_get`, `pr_diff`, `pr_threads`, `git_worktree_fetch` |
+| 1. Resolve | Parse the URL (`github.com/o/r/pull/N`, `gitlab.example.com/g/sg/p/-/merge_requests/N`). Fetch metadata, base/head SHAs, the diff, linked issues (GitHub `closingIssuesReferences`; GitLab `closes_issues`), existing threads, and CI status. Fetch the head into a local worktree, which `symbol_refs` and runtime analysis need. **If the current user is the PR author, warn** that the forge will not accept approval from them, and carry on in comment-only mode. (An author revising an open PR uses `/pr-create`, which skips creation per §8.1 step 0 and runs augmentation and an author-mode review on the update.) *Not yet built.* | MCP `pr_resolve`, `pr_get`, `pr_diff`, `pr_threads`, `git_worktree_fetch` |
 | 2. Augmentation | Look for a valid augmentation for `head_sha`, locally or via the sticky-comment marker. If none exists, run `pr-augment` (§10). | `pr-augment` |
 | 3. Diff-map | Build the diff-map and join all claims onto units. Compute the review order (highest risk first). | MCP `diffmap_build` |
-| 4. Automated PR review (reviewer mode) | Run concurrently with augmentation, as the paper specifies, then cross-link the results. Covers syntax, policy, logic defects, security and edge cases. Existing human threads are passed in so the agent does not duplicate them. | `code-reviewer` (mode=reviewer) |
+| 4. Automated PR review (reviewer mode) | In the paper, augmentation precedes review (l.828-834). Its "concurrently" (l.843) refers to the Explanation Agent within the review stage. We start the automated review in parallel with augmentation as an engineering optimisation, then cross-link the results. Covers syntax, policy, logic defects, security and edge cases. Existing human threads are passed in so the agent does not duplicate them. | `code-reviewer` (mode=reviewer) |
 | 5. Fix suggestion | **Lazy by default, to control cost:** patches are generated only for blocker/major findings, or when the reviewer asks. | `fix-suggester` |
 | 6. Interactive loop | The main session acts as the **PR Review Agent** (§9.2). | routing |
 | 7. **Gate 2** | Show the pending review: queued comments, attached patches, and the recommended verdict with reasons. The reviewer chooses the verdict. | main session |
@@ -410,7 +415,7 @@ All four analysts run **in parallel**: each needs only the diff, the issue conte
 **Cost controls:**
 - `--depth quick` skips runtime and limits impact analysis to direct callers.
 - `deep` adds before/after benchmarks when the reviewer requests them.
-- Very large diffs (more than `max_diff_lines`) are split by diff-map module, and each analyst runs per chunk before the summary step.
+- **Token-limit gate (paper §5.1.1, l.1553).** `review_plan` computes the reviewable lines deterministically. Above `max_diff_lines` (default 4000), the orchestrator must stop, show the warning, and let the human choose: narrow the scope, ask the author to split the PR, or proceed with batched review knowing cross-batch interactions may be missed. Below the threshold, batching still happens and is announced.
 
 ---
 
@@ -520,7 +525,11 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `git_diff(base, head)` · `git_log(range)` · `git_worktree_fetch(id)` | Local git |
 | `pr_checkout(url)` | Mirror and worktree at the PR head; merge base (§7) |
 | `diffmap_build(run_id)` · `diffmap_get(run_id)` · `diffmap_unit(run_id, unit_id)` | §7 |
-| `report_submit(run_id, report, stage?)` · `reports_get(run_id, stage?)` · `evidence_check(run_id, evidence[])` · `report_schema()` | §6 validation and storage (local disk only) |
+| `report_slot(run_id, agent_name, stage?)` (orchestrator only) · `report_submit(run_id, token, report, markdown?, stage?)` · `reports_get` · `evidence_check` · `report_schema` | §6 validation and storage (local disk only) |
+| `code_read(run_id, path, side?, start?, end?)` · `code_search(run_id, pattern, paths?, side?)` · `code_list(run_id, prefix?, side?)` | Confined code access via git objects (ADR 0005) |
+| `policy_get(run_id)` | Review policy (CLAUDE.md, AGENTS.md, CONTRIBUTING, `.aireviewer.yml`) **from the merge base**, plus the list of policy files the PR modifies |
+| `review_plan(run_id, …)` | Deterministic review batches and the token-limit gate |
+| `findings_list(run_id)` · `finding_get(run_id, id)` · `diffmap_unit(…).highlighted` | Highlighted-diff walkthrough |
 | `repo_metrics(paths[], windows[])` | Churn, hotspots, bug-fix history |
 | `symbol_refs(symbols[], scope)` | Callers, implementers, importers |
 | `lint_run(cmd)` | Run configured analyzers in the sandbox; return normalised findings |
@@ -563,11 +572,12 @@ The review path comes first: it can be tested on any PR link immediately and nee
 |---|---|---|
 | **M0** ✅ | Plugin scaffold; MCP skeleton; `forge_detect`, `pr_resolve`, `pr_get`, `pr_diff` for GitHub **and** GitLab; run-context store | `/pr-review <url>` prints PR metadata and diff stats for both forges |
 | **M1** ✅ (agent prompts not yet evaluated) | `pr_checkout`, `diffmap_build`/`get`/`unit`, `report_submit` with evidence validation, `evidence_check`; `code-reviewer`, `explainer`, `summary-generator` subagents; `/pr-review` panel and Q&A | Useful read-only review session on real PRs; schema validation enforced |
-| **M2** | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); sticky comment with marker reuse | Augmentation reused across machines; staleness by head SHA works |
-| **M3** | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges | Posted batched review with inline suggestions on GH and GL |
+| **M1.1** ✅ | Hardening from the paper-fidelity audit: submit tokens, `run_context_put` lockdown, worktrees out of the workspace plus confined `code_*` tools, policy from the merge base, metric value checks, token-limit gate, author-mode style findings | See ADR 0005 |
+| **M2** | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); sticky comment with marker reuse. **Also:** fetch linked (closing) issues in `/pr-review` and feed them to every analyst, the reviewer and the explainer; for PRs with no link, an issue-link *suggestion* in `/pr-review`; `reviewers_suggest` in `/pr-review` when nobody is assigned (requesting still gated); `summary-generator` returns to the paper's role of synthesising the four analysts, and the findings digest becomes separate | Augmentation reused across machines; staleness by head SHA works |
+| **M3** | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
 | **M4** | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion | Branch → PR with linked issue and applied fixes, human-approved |
 | **M5** | `runtime-analyst` + `sandbox_run` (base/head, reruns, flakiness) | Deterministic vs flaky classification on a seeded flaky test |
-| **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2 | Metrics dashboard data accumulates; CI posts augmentation automatically |
+| **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497) | Metrics dashboard data accumulates; CI posts augmentation automatically |
 
 ---
 
@@ -579,7 +589,10 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | Vector DB + cross-encoder for issue linking | Forge search + LLM re-rank (v1); local hybrid index (v2) | Zero infrastructure to start; same interface later |
 | Custom PR UI panels | Terminal panel + sticky comment + optional HTML report | GitHub and GitLab have no general custom-panel API (the paper itself notes GitHub uses bot comments) |
 | Real-time toxicity/usefulness checks in the comment box | Checks at composition time in the CLI | No browser extension in v1 |
-| Reviewer acceptance of invitations before review | Not modelled; whoever runs `/pr-review` is the reviewer | The CLI user is, by definition, the active reviewer |
+| Toxicity and usefulness checks in the comment box | Applied only to comments composed through aireviewer | Comments typed directly in the GitHub or GitLab UI bypass both checks. We cannot intercept the forge UI |
+| Author-mode review catches style and bikeshedding before review (§4.2.3) | Style findings (`info`) only in author mode; skipped in reviewer mode unless a policy requires them | Reviewer-mode bikeshedding is exactly what §4.5.5 tries to prevent |
+| PR abandonment (§4.5.6) | Not modelled | No agent action is needed; the retrospective can still be run manually |
+| Reviewer acceptance of invitations before review | Not modelled; whoever runs `/pr-review` is the reviewer. This also drops the reject → re-recommend loop | The CLI user is, by definition, the active reviewer |
 
 ---
 
@@ -669,7 +682,7 @@ aireviewer/
 
 ---
 
-## 21. Cross-cutting changes: multi-PR and multi-repo (planned, after M6)
+## 21. Cross-cutting changes: multi-PR and multi-repo (planned, after M6; an extension beyond the paper)
 
 **Problem.** One logical change often spans several PRs: a stacked series in one repo, or coordinated PRs across repos (API + client + infra, or a library bump plus its consumers). Reviewing each PR alone misses exactly what the paper's impact and alignment analysis is for: a contract changed in one PR and consumed in another, deploy ordering, and a requirement satisfied only by the *union* of the PRs.
 
