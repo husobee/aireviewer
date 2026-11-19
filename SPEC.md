@@ -730,3 +730,26 @@ aireviewer/
 - **Creation side**: `/pr-create` across several local branches or repos produces linked PRs with cross-references and a declared merge order.
 
 **Open questions:** discovery precision versus explicit declaration; auth across multiple hosts; size and cost limits for large sets; how a partially merged set is represented.
+
+---
+
+## 22. External issue trackers: Jira (planned, after M6; extends §4.2.2 and §4.3.1)
+
+**Problem.** Many teams track requirements in Jira, not in GitHub or GitLab issues. Today `pr_issues` only sees forge issues. A PR whose acceptance criteria live in `PROJ-123` would get `alignment: unknown`, and issue linking during `/pr-create` would never find the real ticket.
+
+**Direction (to be designed, not yet committed):**
+- **Tracker abstraction.** A `tracker.Provider` interface separate from `forge.Provider`. It lets Jira (Cloud and Data Center) and, later, others such as Linear plug in without touching the forge adapters. Items are normalised into the same shape as `forge.Issue`, with ref `PROJ-123`, title, description, status, labels, URL and source. They also carry an explicit **acceptance-criteria** field, mapped from a configurable Jira custom field when a team uses one.
+- **Discovery.** Jira keys (`[A-Z][A-Z0-9]+-\d+`) found in:
+  - the branch name, PR title and body, and commit messages;
+  - Jira's development-panel links where available.
+
+  Only project keys allow-listed in `.aireviewer.yml` (`jira.projects`, read from the merge base) are accepted, to avoid false matches such as `UTF-8`.
+- **Alignment.** `pr_issues` returns forge issues and tracker items together. The `issue` evidence kind works unchanged, because the quote is verified against the item's text, so alignment can cite Jira acceptance criteria verbatim.
+- **Creation side (§8.2).** The `issue-linker` searches Jira with JQL generated from the diff, alongside forge issues. Creating a Jira ticket when nothing matches is a **gated write** (§4 rule 6).
+- **Access.** Use a Jira API token from the environment (`JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`), or an Atlassian MCP connector when the user has one.
+- **Privacy.** Ticket content goes to the model provider just like PR content. Teams can restrict which projects are readable through the allow-list.
+
+**Open questions:**
+- How to handle epics and sub-tasks, and whether alignment should consider the parent epic's criteria.
+- Mapping custom fields across Jira instances.
+- Linking multiple tickets that span a change set (§21).
