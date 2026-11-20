@@ -316,6 +316,19 @@ Requests the paper supports (§4.2.5) all go through the main session, which re-
 | Template | `.github/pull_request_template.md` | `.gitlab/merge_request_templates/*.md` |
 | Labels | labels API | labels field |
 
+### 8.5 As built (M4; ADR 0007)
+- **Branch runs.** `branch_checkout` resolves the forge from the remote as configured (before `insteadOf` rewriting), the branch (default: current) and the base (default: the forge's default branch). If an open PR exists for the branch, creation is skipped. Otherwise the branch is fetched from the author's repository into the shared mirror, so the diff-map, code access, reports, findings and fixes work exactly as for a PR.
+- **Draft state.** Title, description, draft flag, labels, scored issue links, the proposed new issue, accepted fixes and the commit message live in `create/draft.json`. They are edited only through `create_draft_update`, which verifies issue links against the forge. A link follows `issue_link.threshold` unless the author decides explicitly.
+- **One confirmed `create` proposal.** `create_prepare` freezes the plan, and `proposal_submit` runs it after the same confirmation as a review (ADR 0006):
+  1. commit the accepted fixes to the local branch (plumbing in a private index, honouring `commit.gpgSign`; a checked-out branch is fast-forwarded, never overwritten);
+  2. create the new issue;
+  3. push with the author's own credentials (never forced; upstream set);
+  4. open the PR with closing keywords and the provenance footer.
+
+  Before pushing, the branch must point at exactly the previewed commit. Completed steps are recorded, so a retry resumes without duplicating anything.
+- **After creation** the skill checks out the new PR as a normal PR run for augmentation, the gated summary comment and gated reviewer requests.
+- **Not yet:** PRs from forks, `lint_run` (needs the M5 sandbox), and issue retrieval v2 (M6).
+
 ---
 
 ## 9. Phase B — PR Review (`/pr-review <url> [--no-post] [--depth quick|standard|deep]`)
@@ -570,7 +583,8 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `symbol_refs(run_id, units?)` | References and fan-in of changed symbols, dangling refs, interface files (records metrics) |
 | `lint_run(cmd)` | Run configured analyzers in the sandbox; return normalised findings |
 | `sandbox_run(spec)` | Base vs head execution, reruns, artifacts |
-| `issues_search(queries[], filters)` · `issue_get(ref)` | Issue retrieval |
+| `issues_search(run_id, queries[])` · `issue_get(run_id, number)` | Issue retrieval for a branch run (§8.2 v1) |
+| `branch_checkout(branch?, base?, remote?)` · `create_context(run_id)` · `create_draft_get/update(run_id, …)` · `create_prepare(run_id)` | `/pr-create` branch runs and the Gate 1 draft (M4; ADR 0007). The ✎ writes below (`git_apply_patch`, `issue_create`, `git_push`, `pr_create`) are not separate tools: `proposal_submit` performs them, in order, for a confirmed `create` proposal |
 | `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
 | `review_metrics(id)` | §11.2 |
 | `run_context_get/put(run_id, path, json)` | Read and write `.aireviewer/runs` |
@@ -611,8 +625,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M1.1** ✅ | Hardening from the paper-fidelity audit: submit tokens, `run_context_put` lockdown, worktrees out of the workspace plus confined `code_*` tools, policy from the merge base, metric value checks, token-limit gate, author-mode style findings | See ADR 0005 |
 | **M2** ✅ (agent prompts not yet evaluated) | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); `pr_issues`; `reviewers_suggest`; `.aireviewer.yml` read from the merge base; issue-quote evidence and report `facets`; risk-ordered diff-map. **Moved to M3:** the sticky comment with marker reuse, because posting is a gated write and imported reports must be re-validated. **Also:** fetch linked (closing) issues in `/pr-review` and feed them to every analyst, the reviewer and the explainer; for PRs with no link, an issue-link *suggestion* in `/pr-review`; `reviewers_suggest` in `/pr-review` when nobody is assigned (requesting still gated); `summary-generator` returns to the paper's role of synthesising the four analysts, and the findings digest becomes separate | Augmentation reused across machines; staleness by head SHA works |
 | **M3** ✅ (agent prompts not yet evaluated; see ADR 0006) | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges; **gated** `reviewers_request` and `sticky_comment_upsert`. Reports imported from a sticky comment are re-validated against the local checkout and trusted only when authored by the current user or a configured bot. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
-| **M4** | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion | Branch → PR with linked issue and applied fixes, human-approved |
-| **M5** | `runtime-analyst` + `sandbox_run` (base/head, reruns, flakiness) | Deterministic vs flaky classification on a seeded flaky test |
+| **M4** ✅ (agent prompts not yet evaluated; see ADR 0007) | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion. **Moved to M5:** `lint_run`, because analyzers run in the sandbox | Branch → PR with linked issue and applied fixes, human-approved |
+| **M5** | `runtime-analyst` + `sandbox_run` (base/head, reruns, flakiness); `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
 | **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497) | Metrics dashboard data accumulates; CI posts augmentation automatically |
 
 ---
@@ -630,6 +644,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | Toxicity and usefulness checks in the comment box | Applied only to comments composed through aireviewer | Comments typed directly in the GitHub or GitLab UI bypass both checks. We cannot intercept the forge UI |
 | Author-mode review catches style and bikeshedding before review (§4.2.3) | Style findings (`info`) only in author mode; skipped in reviewer mode unless a policy requires them | Reviewer-mode bikeshedding is exactly what §4.5.5 tries to prevent |
 | PR abandonment (§4.5.6) | Not modelled | No agent action is needed; the retrospective can still be run manually |
+| Gate 1 approves each artifact (§4.2.5) | Each fix is approved individually during revision, then one frozen proposal covering commit, issue, push and PR is confirmed | The preview shows every step and its content; confirming steps separately would leave half-created states |
+| PRs from any contributor setup | Same-repository branches only in v1 | Fork PRs need a second remote and cross-repository head handling |
 | Reviewer acceptance of invitations before review | Not modelled; whoever runs `/pr-review` is the reviewer. This also drops the reject → re-recommend loop | The CLI user is, by definition, the active reviewer |
 
 ---

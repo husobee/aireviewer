@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M4: PR creation; ADR 0007)
+- `/pr-create [branch] [--base] [--issue] [--draft] [--fast]`: preflight (skips creation when an open PR exists), detail generation from the diff, commits and the repo template, issue linking with 0–1 scores and a drafted issue when none fits, an author-mode code review, validated fix patches, Gate 1 revision, then one confirmed submission, followed by augmentation and reviewer suggestions on the new PR.
+- Branch runs: `branch_checkout` fetches the local branch into the mirror, so every review-side tool works before a PR exists.
+- Tools: `create_context`, `issues_search`, `issue_get`, `create_draft_get`, `create_draft_update`, `create_prepare`.
+- `proposal_submit` for `create` proposals runs, in order, with every step recorded so a retry resumes without duplicates:
+  1. commit the accepted fixes (private-index plumbing; fast-forwards a checked-out branch; honours `commit.gpgSign`);
+  2. create the issue;
+  3. push with the author's credentials;
+  4. open the PR.
+- Forge adapters (GitHub, GitLab): default branch, open PR by branch, issue search and lookup, issue creation, PR/MR creation (labels; GitLab draft prefix).
+- Agents: `pr-detail-generator` and `issue-linker` (Sonnet).
+- Config: `issue_link.threshold` / `include_closed_days` / `allow_create` / `max_candidates` (SPEC §13), `create.signoff`.
+
+### Fixed
+- The confirmation dialog's **Accept** now confirms on its own; declines record their reason (found in the first live posting test).
+
 ### Added (M3: gated posting; ADR 0006)
 - Forge writes on both GitHub and GitLab:
   - batched reviews with inline comments and suggestion blocks;

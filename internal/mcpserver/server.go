@@ -2,15 +2,18 @@
 
 // Package mcpserver wires aireviewer's tools into an MCP server.
 //
-// Tools (none of them write to the forge):
+// Tools by milestone (review.go, code.go, augment.go, gate.go, create.go):
 //
-//	M0: forge_detect, pr_resolve, pr_get, pr_diff,
-//	    run_context_get, run_context_put, run_context_list
-//	M1: pr_checkout, diffmap_build, diffmap_get, diffmap_unit,
-//	    report_submit, reports_get, evidence_check, report_schema
+//	M0: forge_detect, pr_resolve, pr_get, pr_diff, run_context_*
+//	M1: pr_checkout, diffmap_*, report_*, reports_get, evidence_check, code_*
+//	M2: pr_issues, repo_metrics, symbol_refs, reviewers_suggest
+//	M3: comment drafts and checks, fixes, *_prepare, proposal_submit, decisions_get
+//	M4: branch_checkout, create_context, issues_search, issue_get,
+//	    create_draft_get/update, create_prepare
 //
-// Forge write tools arrive in later milestones and are only ever called by
-// orchestrator skills after an explicit human confirmation (SPEC.md §4).
+// Exactly one tool writes outside the run directory: proposal_submit. It
+// posts to the forge (and, for /pr-create, commits the confirmed fixes and
+// pushes) only for a frozen proposal the human confirmed (ADR 0003, 0006, 0007).
 package mcpserver
 
 import (
@@ -89,6 +92,7 @@ func New(cfg Config) *mcp.Server {
 	registerCodeTools(s, h)
 	registerAugmentTools(s, h)
 	registerGateTools(s, h)
+	registerCreateTools(s, h)
 	return s
 }
 

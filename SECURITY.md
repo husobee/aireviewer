@@ -15,7 +15,7 @@ Before 1.0, only the latest release receives security fixes.
 
 aireviewer reads untrusted content (PR/MR text, comments and code), passes it to an LLM, and from M5 executes PR code. We especially want reports about:
 
-- **Prompt injection that bypasses a human gate**: forge content that causes aireviewer to push, create or post anything without explicit user confirmation, or to change a review verdict. This includes posting content that differs from the confirmed preview, forging an elicitation answer, or editing the decision log undetected (ADR 0006).
+- **Prompt injection that bypasses a human gate**: forge content that causes aireviewer to push, create or post anything without explicit user confirmation, or to change a review verdict. This includes posting content that differs from the confirmed preview, forging an elicitation answer, or editing the decision log undetected (ADR 0006). For `/pr-create`, this also covers committing anything other than the confirmed fixes, pushing a commit other than the previewed one, force-pushing, or creating issues or PRs without confirmation (ADR 0007).
 - **Sandbox escape or secret exposure** in runtime analysis (`sandbox_run`): host filesystem access, network egress when disabled, or tokens visible inside the container.
 - **Credential leakage**: tokens written to run artifacts, logs, posted comments, or sent to unintended hosts.
 - **Path traversal** in the run-context store or other file-writing tools.

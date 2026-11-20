@@ -75,8 +75,14 @@ type checkoutState struct {
 	Repo       forge.Repo `json:"repo"`
 	Number     int        `json:"number"`
 	BaseBranch string     `json:"base_branch"`
+	// Branch runs (/pr-create, M4): a local branch with no PR yet.
+	Mode       string `json:"mode,omitempty" jsonschema:"empty for a PR run, branch for /pr-create"`
+	HeadBranch string `json:"head_branch,omitempty"`
+	RemoteName string `json:"remote_name,omitempty"`
 	gitrepo.Checkout
 }
+
+func (st *checkoutState) isBranch() bool { return st.Mode == "branch" }
 
 func (h *handlers) git(repo forge.Repo) *gitrepo.Git {
 	tok := ""

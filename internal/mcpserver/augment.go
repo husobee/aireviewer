@@ -90,6 +90,19 @@ type IssuesOut struct {
 }
 
 func (h *handlers) prIssues(ctx context.Context, _ *mcp.CallToolRequest, in RunIn) (*mcp.CallToolResult, IssuesOut, error) {
+	if st, err := h.loadCheckout(in.RunID); err == nil && st.isBranch() {
+		// Before the PR exists, the linked issues are the author's choices
+		// in the draft (create_draft_update keeps issues.json current).
+		is, _ := h.loadIssues(in.RunID)
+		if is == nil {
+			is = []forge.Issue{}
+		}
+		out := IssuesOut{Issues: is, Linkage: "linked", Note: "branch run: issues linked in the PR draft"}
+		if len(is) == 0 {
+			out.Linkage = "none"
+		}
+		return nil, out, nil
+	}
 	pr, err := h.loadPR(in.RunID)
 	if err != nil {
 		return nil, IssuesOut{}, err

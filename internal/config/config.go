@@ -50,11 +50,27 @@ type Config struct {
 	Gate struct {
 		TrustedBots []string `yaml:"trusted_bots" json:"trusted_bots"`
 	} `yaml:"gate" json:"gate"`
+	// IssueLink configures issue retrieval for /pr-create (SPEC §8.2).
+	IssueLink struct {
+		Threshold         float64 `yaml:"threshold" json:"threshold" jsonschema:"minimum relevance (0-1) for a candidate to be linked with a closing keyword"`
+		IncludeClosedDays int     `yaml:"include_closed_days" json:"include_closed_days" jsonschema:"also consider issues closed this many days ago or less"`
+		AllowCreate       *bool   `yaml:"allow_create" json:"allow_create" jsonschema:"whether /pr-create may propose and create a new issue (default true)"`
+		MaxCandidates     int     `yaml:"max_candidates" json:"max_candidates"`
+	} `yaml:"issue_link" json:"issue_link"`
+	// Create configures /pr-create commits.
+	Create struct {
+		Signoff bool `yaml:"signoff" json:"signoff" jsonschema:"add a DCO Signed-off-by trailer to the fix commit"`
+	} `yaml:"create" json:"create"`
 }
 
 // Footer reports whether to add the provenance footer (default true).
 func (c Config) Footer() bool {
 	return c.Comments.ProvenanceFooter == nil || *c.Comments.ProvenanceFooter
+}
+
+// AllowIssueCreate reports whether /pr-create may create issues (default true).
+func (c Config) AllowIssueCreate() bool {
+	return c.IssueLink.AllowCreate == nil || *c.IssueLink.AllowCreate
 }
 
 // Breaker reports whether the low-confidence circuit breaker is on (default true).
@@ -75,6 +91,9 @@ func Default() Config {
 	c.Limits.MaxParallelAgents = 6
 	c.Comments.Toxicity = "warn"
 	c.Comments.Usefulness = "warn"
+	c.IssueLink.Threshold = 0.7
+	c.IssueLink.IncludeClosedDays = 30
+	c.IssueLink.MaxCandidates = 20
 	return c
 }
 
@@ -127,5 +146,19 @@ func Parse(data []byte) (Config, error) {
 	c.Comments.ProvenanceFooter = in.Comments.ProvenanceFooter
 	c.Review = in.Review
 	c.Gate = in.Gate
+	if t := in.IssueLink.Threshold; t != 0 {
+		if t < 0 || t > 1 {
+			return c, fmt.Errorf(".aireviewer.yml: issue_link.threshold %v must be between 0 and 1", t)
+		}
+		c.IssueLink.Threshold = t
+	}
+	if in.IssueLink.IncludeClosedDays > 0 {
+		c.IssueLink.IncludeClosedDays = in.IssueLink.IncludeClosedDays
+	}
+	c.IssueLink.AllowCreate = in.IssueLink.AllowCreate
+	if in.IssueLink.MaxCandidates > 0 {
+		c.IssueLink.MaxCandidates = min(in.IssueLink.MaxCandidates, 50)
+	}
+	c.Create = in.Create
 	return c, nil
 }

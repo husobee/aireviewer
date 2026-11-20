@@ -98,6 +98,10 @@ func (p *Provider) GetPR(ctx context.Context, ref forge.PRRef) (*forge.PR, error
 	if err != nil {
 		return nil, wrap(err)
 	}
+	return toPR(ref, pr), nil
+}
+
+func toPR(ref forge.PRRef, pr *gh.PullRequest) *forge.PR {
 	state := forge.StateOpen
 	switch {
 	case pr.GetMerged():
@@ -128,7 +132,7 @@ func (p *Provider) GetPR(ctx context.Context, ref forge.PRRef) (*forge.PR, error
 	for _, u := range pr.RequestedReviewers {
 		out.Reviewers = append(out.Reviewers, u.GetLogin())
 	}
-	return out, nil
+	return out
 }
 
 // GetDiff fetches the per-file changes of a PR.

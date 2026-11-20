@@ -4,10 +4,11 @@ forge: auto                  # auto | github | gitlab
 # gitlab_base_url: https://gitlab.example.com
 base_branch: main
 
-issue_link:
-  threshold: 0.70
-  include_closed_days: 30
-  allow_create: true
+issue_link:                  # /pr-create issue retrieval (SPEC §8.2)
+  threshold: 0.70            # candidates scored at or above this are linked with a closing keyword
+  include_closed_days: 30    # also consider issues closed this recently
+  allow_create: true         # may /pr-create propose (and, on confirmation, create) a new issue
+  max_candidates: 20
 
 policies:
   rules:
@@ -47,6 +48,9 @@ review:
 
 gate:
   trusted_bots: []           # accounts whose posted aireviewer summaries may be imported
+
+create:
+  signoff: false             # add a DCO Signed-off-by trailer to the fix commit (signing follows commit.gpgSign)
 
 ci:
   post_augmentation: false   # the only automated post allowed; opt-in (ADR 0003)

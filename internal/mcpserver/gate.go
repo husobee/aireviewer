@@ -867,6 +867,9 @@ func freeze(kind, head string, payload any, preview string, now time.Time) (*Pro
 
 // freshPR re-fetches the PR and fails if its head moved since checkout.
 func (h *handlers) freshPR(ctx context.Context, st *checkoutState) (*forge.PR, forge.Provider, error) {
+	if st.isBranch() {
+		return nil, nil, errors.New("this is a /pr-create branch run: no " + st.Repo.Forge.Abbrev() + " exists yet")
+	}
 	p, err := h.cfg.Providers.Get(ctx, st.Repo)
 	if err != nil {
 		return nil, nil, err
@@ -1255,11 +1258,19 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 	if p.HeadSHA != st.HeadSHA {
 		return nil, SubmitProposalOut{}, errors.New("the proposal was prepared for an older head; prepare it again")
 	}
-	pr, prov, err := h.freshPR(ctx, st)
-	if err != nil {
-		return nil, SubmitProposalOut{}, err
+	var (
+		pr   *forge.PR
+		prov forge.Provider
+	)
+	where := fmt.Sprintf("%s (new %s from %s into %s)", st.Repo.Project, st.Repo.Forge.Abbrev(), st.HeadBranch, st.BaseBranch)
+	if p.Kind != "create" {
+		if pr, prov, err = h.freshPR(ctx, st); err != nil {
+			return nil, SubmitProposalOut{}, err
+		}
+		where = fmt.Sprintf("%s %s", st.Repo.Forge.Abbrev(), pr.Ref)
+	} else if !st.isBranch() {
+		return nil, SubmitProposalOut{}, errors.New("a create proposal belongs to a branch run")
 	}
-	where := fmt.Sprintf("%s %s", st.Repo.Forge.Abbrev(), pr.Ref)
 	mech, ok, reason, ask, err := h.confirm(req, &p, where)
 	if ask != nil {
 		return ask, SubmitProposalOut{}, nil // the client asks the human and retries with the answer
@@ -1280,6 +1291,8 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 
 	var res forge.PostResult
 	switch p.Kind {
+	case "create":
+		res, err = h.submitCreate(ctx, in.RunID, st, &p)
 	case "review":
 		rp, ok := prov.(forge.ReviewPoster)
 		if !ok {

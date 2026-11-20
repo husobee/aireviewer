@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -59,7 +60,13 @@ func call[T any](t *testing.T, cs *mcp.ClientSession, name string, args any) T {
 		t.Fatal(err)
 	}
 	if res.IsError {
-		t.Fatalf("%s returned error: %+v", name, res.Content)
+		var b strings.Builder
+		for _, c := range res.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				b.WriteString(tc.Text)
+			}
+		}
+		t.Fatalf("%s returned error: %s", name, b.String())
 	}
 	raw, _ := json.Marshal(res.StructuredContent)
 	var out T
