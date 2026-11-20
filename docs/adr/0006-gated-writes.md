@@ -15,6 +15,7 @@ M3 introduces the first forge writes: batched reviews with inline comments and s
 2. **The server asks the human.**
    - With an elicitation-capable client, `proposal_submit` returns an MCP input request containing the preview (SEP-2322 multi round-trip; the SDK falls back to direct elicitation for older protocol versions).
    - The answer comes back on the retried call, bound to that proposal by `RequestState = id:hash`. The model never sees or forges the answer.
+   - Pressing **Accept** confirms. The dialog's single checkbox starts ticked and exists only so the human can refuse from inside the form: an explicit `false`, Decline or Cancel refuses. A refusal records its reason (action and form value) in the log and the result. An earlier version required ticking an unticked box, and the first live test showed that Accept alone reads as consent to people.
    - Without elicitation, the fallback is the client's tool-permission prompt: `proposal_submit` is never pre-approved by the skill.
    - `AIREVIEWER_STRICT_GATE=1` refuses to post without elicitation, for clients configured to auto-approve tools.
 3. **Gate checks at prepare time.** Each check below blocks the proposal unless noted.

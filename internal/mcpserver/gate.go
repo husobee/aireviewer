@@ -26,6 +26,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1149,6 +1150,7 @@ type SubmitProposalOut struct {
 	Posted       bool              `json:"posted"`
 	Declined     bool              `json:"declined"`
 	Confirmation string            `json:"confirmation" jsonschema:"elicitation (asked by the server) or permission_prompt (client tool approval)"`
+	Reason       string            `json:"reason,omitempty" jsonschema:"why the confirmation did not count, when declined"`
 	Result       *forge.PostResult `json:"result,omitempty"`
 	LogHead      string            `json:"log_head"`
 }
@@ -1171,9 +1173,11 @@ func elicitParams(p *Proposal, where string) *mcp.ElicitParams {
 	}
 	msg += "\n\nPost exactly this to " + where + "?"
 	return &mcp.ElicitParams{Message: msg, RequestedSchema: map[string]any{
-		"type":       "object",
-		"properties": map[string]any{"confirm": map[string]any{"type": "boolean", "title": "Yes, post exactly this", "default": false}},
-		"required":   []string{"confirm"},
+		"type": "object",
+		"properties": map[string]any{"confirm": map[string]any{
+			"type": "boolean", "title": "Yes, post exactly this", "default": true,
+			"description": "Press Accept to post. Untick this, or press Decline, to refuse.",
+		}},
 	}}
 }
 
@@ -1184,28 +1188,49 @@ func elicitParams(p *Proposal, where string) *mcp.ElicitParams {
 // answer, bound to this exact proposal through RequestState. Otherwise the
 // client's tool-permission prompt is the confirmation, unless
 // AIREVIEWER_STRICT_GATE=1.
-func (h *handlers) confirm(req *mcp.CallToolRequest, p *Proposal, where string) (mech string, ok bool, ask *mcp.CallToolResult, err error) {
+func (h *handlers) confirm(req *mcp.CallToolRequest, p *Proposal, where string) (mech string, ok bool, reason string, ask *mcp.CallToolResult, err error) {
 	if req != nil && req.Params != nil {
 		if r, found := req.Params.InputResponses["confirm"]; found {
 			if req.Params.RequestState != confirmState(p) {
-				return "elicitation", false, nil, errors.New("confirmation does not belong to this proposal")
+				return "elicitation", false, "", nil, errors.New("confirmation does not belong to this proposal")
 			}
-			er, isElicit := r.(*mcp.ElicitResult)
-			return "elicitation", isElicit && er.Action == "accept" && er.Content["confirm"] == true, nil, nil
+			ok, reason := elicitAnswer(r)
+			return "elicitation", ok, reason, nil, nil
 		}
 	}
 	if clientElicits(req) {
-		return "elicitation", false, &mcp.CallToolResult{
+		return "elicitation", false, "", &mcp.CallToolResult{
 			InputRequests: mcp.InputRequestMap{"confirm": elicitParams(p, where)},
 			RequestState:  confirmState(p),
 		}, nil
 	}
 	if os.Getenv("AIREVIEWER_STRICT_GATE") == "1" {
-		return "none", false, nil, errors.New("AIREVIEWER_STRICT_GATE=1: this client cannot show a server-side confirmation (MCP elicitation), so posting is refused")
+		return "none", false, "", nil, errors.New("AIREVIEWER_STRICT_GATE=1: this client cannot show a server-side confirmation (MCP elicitation), so posting is refused")
 	}
 	// proposal_submit is never pre-approved by the skill, so the client's
 	// tool-permission prompt is the confirmation.
-	return "permission_prompt", true, nil, nil
+	return "permission_prompt", true, "", nil, nil
+}
+
+// elicitAnswer interprets the human's answer to the confirmation dialog.
+// Pressing Accept on a dialog that shows the exact preview is the deliberate
+// act; the optional checkbox (ticked by default) only lets the human refuse
+// from inside the form. Clients may omit unchanged defaults, so a missing
+// field counts as ticked; an explicit false, or any other action, refuses.
+func elicitAnswer(r mcp.InputResponse) (bool, string) {
+	er, isElicit := r.(*mcp.ElicitResult)
+	if !isElicit || er == nil {
+		return false, fmt.Sprintf("unexpected response type %T", r)
+	}
+	if er.Action != "accept" {
+		return false, "dialog answered " + strconv.Quote(er.Action)
+	}
+	if v, present := er.Content["confirm"]; present {
+		if b, isBool := v.(bool); !isBool || !b {
+			return false, fmt.Sprintf("accepted with confirm=%v (box unticked)", v)
+		}
+	}
+	return true, ""
 }
 
 func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest, in SubmitProposalIn) (*mcp.CallToolResult, SubmitProposalOut, error) {
@@ -1235,7 +1260,7 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		return nil, SubmitProposalOut{}, err
 	}
 	where := fmt.Sprintf("%s %s", st.Repo.Forge.Abbrev(), pr.Ref)
-	mech, ok, ask, err := h.confirm(req, &p, where)
+	mech, ok, reason, ask, err := h.confirm(req, &p, where)
 	if ask != nil {
 		return ask, SubmitProposalOut{}, nil // the client asks the human and retries with the answer
 	}
@@ -1244,8 +1269,8 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		return nil, SubmitProposalOut{}, err
 	}
 	if !ok {
-		head, _ := h.logEvent(in.RunID, "human_declined", "human", map[string]any{"id": p.ID, "hash": p.Hash, "via": mech})
-		return nil, SubmitProposalOut{Declined: true, Confirmation: mech, LogHead: head}, nil
+		head, _ := h.logEvent(in.RunID, "human_declined", "human", map[string]any{"id": p.ID, "hash": p.Hash, "via": mech, "reason": reason})
+		return nil, SubmitProposalOut{Declined: true, Confirmation: mech, Reason: reason, LogHead: head}, nil
 	}
 	actor := "human"
 	if mech == "permission_prompt" {

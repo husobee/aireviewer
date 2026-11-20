@@ -239,7 +239,7 @@ func TestGateRefusals(t *testing.T) {
 	// Declined confirmation: nothing posted, decline logged.
 	pp := call[ProposalOut](t, cs, "review_prepare", map[string]any{"run_id": run, "verdict": "comment", "body": "notes", "comment_ids": []string{}})
 	sub := call[SubmitProposalOut](t, cs, "proposal_submit", map[string]any{"run_id": run, "proposal_id": pp.ProposalID, "hash": pp.Hash})
-	if !sub.Declined || sub.Posted || len(gp.reviews) != 0 {
+	if !sub.Declined || sub.Posted || sub.Reason == "" || len(gp.reviews) != 0 {
 		t.Errorf("declined submit = %+v", sub)
 	}
 	// Head moved after preparing: refused.
@@ -359,5 +359,30 @@ func TestStickyExportImport(t *testing.T) {
 	gp.mu.Unlock()
 	if imp := call[ImportOut](t, cs2, "augmentation_import", map[string]any{"run_id": co2.RunID}); len(imp.Imported) != 0 || !strings.Contains(imp.Note, "mallory") {
 		t.Errorf("untrusted import = %+v", imp)
+	}
+}
+
+func TestElicitAnswer(t *testing.T) {
+	cases := []struct {
+		name string
+		r    mcp.InputResponse
+		ok   bool
+	}{
+		{"accept, box left ticked", &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, true},
+		{"accept, default omitted by client", &mcp.ElicitResult{Action: "accept"}, true},
+		{"accept, box unticked", &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": false}}, false},
+		{"accept, non-bool value", &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": "yes"}}, false},
+		{"decline", &mcp.ElicitResult{Action: "decline", Content: map[string]any{"confirm": true}}, false},
+		{"cancel", &mcp.ElicitResult{Action: "cancel"}, false},
+		{"nil response", nil, false},
+	}
+	for _, c := range cases {
+		ok, reason := elicitAnswer(c.r)
+		if ok != c.ok {
+			t.Errorf("%s: ok=%v, want %v (reason %q)", c.name, ok, c.ok, reason)
+		}
+		if !ok && reason == "" {
+			t.Errorf("%s: a refusal must carry a reason", c.name)
+		}
 	}
 }

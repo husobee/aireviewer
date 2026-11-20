@@ -103,6 +103,6 @@ Print the server-rendered Markdown **verbatim**: `finding_get` → `rendered`, a
    - If the gate holds anything, show exactly what and why, and resolve it with the reviewer: re-check, edit, drop, or override with a reason.
 4. Show the **entire `preview` verbatim** together with any `warnings`. Ask: "Post this review exactly as shown?"
 5. Only on an explicit yes, call `proposal_submit` with `proposal_id` and `hash`.
-   - If it returns `declined`, say that nothing was posted.
+   - If it returns `declined`, say that nothing was posted and quote its `reason` verbatim (for example, the dialog was accepted with the box unticked), so the reviewer knows what happened.
    - If the head moved, explain this and offer to re-run on the new head.
    - On success, show the URL and any notes. On GitLab, request-changes is expressed in the summary, since the API has no such state.
