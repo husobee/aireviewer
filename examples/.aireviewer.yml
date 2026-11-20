@@ -44,6 +44,7 @@ comments:
   toxicity: warn             # off | warn | block
   usefulness: warn
   provenance_footer: true    # footer with the decision-log head hash on posted reviews
+  # voice: "Concise and kind; prefer questions over commands."  # team default review voice; reviewers' personal voices take precedence
 
 review:
   require_critique: false    # require the reviewer's own note before posting ("PR Critique", paper l.1748)

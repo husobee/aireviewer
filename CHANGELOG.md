@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M5.1: reviewer voice; ADR 0009)
+- `voice_get`, `voice_set`, `voice_clear`: a personal voice profile (description plus up to 5 example comments) stored in the reviewer's configuration directory, combined with an optional team default (`comments.voice`, read from the merge base). The personal voice takes precedence.
+- `/pr-review` words the comments and review bodies it proposes in the voice. The toxicity and usefulness agents use it only to word their rewrites, never for verdicts. The reviewer's own words are never restyled.
+- Saving a voice is never pre-approved: the reviewer approves the exact text.
+
 ### Added (M5: sandboxed runtime analysis; ADR 0008)
 - `runtime_prepare` → confirmed `runtime` proposal → `runtime_run`. Each command runs on the merge base and the head in Docker, and failures are re-run `runtime.reruns` times. Results are classified per test (`go test -json`) or per command as `pass`, `deterministic_fail`, `flaky` or `timeout`, then compared base vs head (`new_failure`, `fixed`, `still_failing`, `flaky`, …). Logs are `runtime/` trace artifacts and counts are metrics.
 - Container isolation:

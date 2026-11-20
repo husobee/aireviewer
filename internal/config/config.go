@@ -39,6 +39,9 @@ type Config struct {
 		Toxicity         string `yaml:"toxicity" json:"toxicity" jsonschema:"off | warn | block"`
 		Usefulness       string `yaml:"usefulness" json:"usefulness" jsonschema:"off | warn | block"`
 		ProvenanceFooter *bool  `yaml:"provenance_footer" json:"provenance_footer"`
+		// Voice is the team's default review voice (ADR 0009), combined
+		// with each reviewer's personal profile.
+		Voice string `yaml:"voice" json:"voice"`
 	} `yaml:"comments" json:"comments"`
 	Review struct {
 		RequireCritique bool `yaml:"require_critique" json:"require_critique"`
@@ -167,6 +170,10 @@ func Parse(data []byte) (Config, error) {
 		}
 	}
 	c.Comments.ProvenanceFooter = in.Comments.ProvenanceFooter
+	if len(in.Comments.Voice) > 1000 {
+		return c, fmt.Errorf(".aireviewer.yml: comments.voice is %d characters; keep it under 1000", len(in.Comments.Voice))
+	}
+	c.Comments.Voice = in.Comments.Voice
 	c.Review = in.Review
 	c.Gate = in.Gate
 	if t := in.IssueLink.Threshold; t != 0 {

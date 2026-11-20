@@ -401,6 +401,8 @@ draft ──► [comment-toxicity ∥ comment-usefulness] ──► verdicts
 - **Gate 2.** `review_prepare` runs every check, including the circuit breaker, self-review, reviewer-first and PR Critique, and freezes the exact review. `proposal_submit` posts it only with the matching hash, on an unchanged head, after the server's own elicitation to the human (or the client's permission prompt; `AIREVIEWER_STRICT_GATE=1` requires elicitation).
 - **Logging and provenance.** Every step goes to the hash-chained decision log. The posted footer anchors the log head hash.
 
+**Reviewer voice (M5.1; ADR 0009).** Comments and review bodies that aireviewer proposes, and the rewrites from the toxicity and usefulness agents, are worded in the reviewer's voice. That voice combines a personal profile (a description plus up to 5 example comments, stored in the reviewer's configuration directory) with an optional team default (`comments.voice` from the merge-base config); the personal voice wins on conflicts. The voice changes wording only, never what is claimed, how serious it is, or any check verdict. Text the reviewer writes is used verbatim. `voice_set` / `voice_clear` are never pre-approved, so the reviewer approves the exact text that is saved.
+
 ### 9.4 Forge mapping (review)
 
 | Concern | GitHub | GitLab |
@@ -546,6 +548,7 @@ comments:
   toxicity: warn            # off | warn | block
   usefulness: warn
   provenance_footer: true
+  voice: "Concise and kind; prefer questions over commands."   # team default review voice (ADR 0009)
 
 limits:
   max_diff_lines: 4000
@@ -588,6 +591,7 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `branch_checkout(branch?, base?, remote?)` · `create_context(run_id)` · `create_draft_get/update(run_id, …)` · `create_prepare(run_id)` | `/pr-create` branch runs and the Gate 1 draft (M4; ADR 0007). The ✎ writes below (`git_apply_patch`, `issue_create`, `git_push`, `pr_create`) are not separate tools: `proposal_submit` performs them, in order, for a confirmed `create` proposal |
 | `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
 | `review_metrics(id)` | §11.2 |
+| `voice_get(run_id?)` · ✎ `voice_set(description, examples[], use_team_default?)` · ✎ `voice_clear()` | Reviewer voice (ADR 0009); the writes touch only the reviewer's own profile and are never pre-approved |
 | `run_context_get/put(run_id, path, json)` | Read and write `.aireviewer/runs` |
 | ✎ `git_apply_patch(patch, commit_msg)` · ✎ `git_push(branch)` | Gate 1 only |
 | ✎ `issue_create(title, body, labels)` · ✎ `pr_create(spec)` · ✎ `pr_update(id, spec)` | Gate 1 only |
@@ -628,6 +632,7 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M3** ✅ (agent prompts not yet evaluated; see ADR 0006) | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges; **gated** `reviewers_request` and `sticky_comment_upsert`. Reports imported from a sticky comment are re-validated against the local checkout and trusted only when authored by the current user or a configured bot. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
 | **M4** ✅ (agent prompts not yet evaluated; see ADR 0007) | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion. **Moved to M5:** `lint_run`, because analyzers run in the sandbox | Branch → PR with linked issue and applied fixes, human-approved |
 | **M5** ✅ (agent prompt not yet evaluated; see ADR 0008) | `runtime-analyst` + sandboxed `runtime_run` (base/head, reruns, flakiness), gated by a confirmed `runtime` plan; `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
+| **M5.1** ✅ (see ADR 0009) | Reviewer voice: personal profile plus team default (`comments.voice`), applied to proposed comments, review bodies and check-agent rewrites; never to verdicts or the reviewer's own words | Drafted comments follow the configured voice; checks unchanged |
 | **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497). **Also (risk, §10):** `risk.bug_labels`. A commit counts as a bug fix when its subject matches `bugfix_keywords` **or** it belongs to a merged PR/MR carrying one of the labels (resolved through the forge API, cached per repository, anchored to the merge base). `repo_metrics` records how many fixes were found by keyword, by label or both, and still works offline from keywords alone when the forge lookup is unavailable | Metrics dashboard data accumulates; CI posts augmentation automatically; label-based bug-fix counts appear in `repo_metrics` |
 
 ---

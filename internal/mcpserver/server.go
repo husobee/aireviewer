@@ -10,13 +10,16 @@
 //	M3: comment drafts and checks, fixes, *_prepare, proposal_submit, decisions_get
 //	M4: branch_checkout, create_context, issues_search, issue_get,
 //	    create_draft_get/update, create_prepare
-//	M5: runtime_prepare, runtime_run, runtime_results, lint_run (runtime.go)
+//	M5: runtime_prepare, runtime_run, runtime_results, lint_run, runtime_import (runtime.go)
+//	M5.1: voice_get, voice_set, voice_clear (voice.go)
 //
 // Exactly one tool writes outside the run directory: proposal_submit. It
 // posts to the forge (and, for /pr-create, commits the confirmed fixes and
 // pushes) only for a frozen proposal the human confirmed (ADR 0003, 0006, 0007).
 // runtime_run and lint_run execute code only in the Docker sandbox, and only
-// for a runtime plan the human confirmed the same way (ADR 0008).
+// for a runtime plan the human confirmed the same way (ADR 0008). voice_set and
+// voice_clear write only the reviewer's own profile in their configuration
+// directory, and no skill pre-approves them (ADR 0009).
 package mcpserver
 
 import (
@@ -60,6 +63,9 @@ type Config struct {
 	// Sandbox runs untrusted code for runtime analysis and static analyzers
 	// (M5). nil disables both (they report not_applicable).
 	Sandbox sandbox.Runner
+	// VoiceDir holds the reviewer's personal voice profile (M5.1); empty
+	// disables personal voices.
+	VoiceDir string
 }
 
 // New builds the MCP server with all M0 tools registered.
@@ -101,6 +107,7 @@ func New(cfg Config) *mcp.Server {
 	registerGateTools(s, h)
 	registerCreateTools(s, h)
 	registerRuntimeTools(s, h)
+	registerVoiceTools(s, h)
 	return s
 }
 

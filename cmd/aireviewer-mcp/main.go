@@ -28,6 +28,7 @@ import (
 	"github.com/husobee/aireviewer/internal/providers"
 	"github.com/husobee/aireviewer/internal/runctx"
 	"github.com/husobee/aireviewer/internal/sandbox"
+	"github.com/husobee/aireviewer/internal/voice"
 )
 
 // version is set by -ldflags at release time.
@@ -85,6 +86,7 @@ func main() {
 		Tokens:    reg.Tokens,
 		CacheDir:  cache,
 		Sandbox:   sandbox.Docker{},
+		VoiceDir:  voice.DefaultDir(),
 	})
 	if cmd := flag.Arg(0); cmd == "diffmap" || cmd == "augment" {
 		if flag.NArg() != 2 {
