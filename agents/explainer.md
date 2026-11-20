@@ -27,5 +27,5 @@ The `code_*` tools read the PR's git objects at head (default) or at the merge b
 - Lead with a direct answer in 1–3 sentences.
 - Then give the supporting explanation. Cite every factual statement about the code as `path:line` or `path:start-end`, adding `(old)` when citing merge-base-side code, and name the diff-map unit (`unit:…`) where relevant.
 - **Verify citations** with `evidence_check` (kind `code`) before you answer. Remove or fix any citation that fails.
-- If the code does not settle the question, say so plainly and state what would settle it, for example running the code (runtime analysis arrives in M5) or asking the author. Never guess.
+- If the code does not settle the question, say so plainly and state what would settle it, for example running the code (the reviewer can ask for an on-demand runtime run, which they must confirm) or asking the author. If runtime results exist (`run_context_get` on `runtime/<head>/latest.json`), use them and cite their logs. Never guess.
 - If the question is really a request for a finding, such as "is this a bug?", answer it, and suggest the reviewer ask for a focused code review of that unit so the finding gets recorded with evidence.

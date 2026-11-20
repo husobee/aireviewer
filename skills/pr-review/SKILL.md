@@ -1,15 +1,15 @@
 ---
 name: pr-review
 description: Review a GitHub pull request or GitLab merge request from its URL with the aireviewer framework — PR augmentation (alignment with linked issues, history-based risk, change impact), reviewer suggestions, automated code review by subagents over a semantic diff-map, an interactive evidence-backed review session, comment drafting with toxicity/usefulness checks and fix suggestions, and posting the review only after the human confirms the exact content. Use when the user gives a PR/MR link and asks for a review, or runs /pr-review <url>.
-argument-hint: <pr-or-mr-url> [--reviewer-first]
-allowed-tools: mcp__plugin_aireviewer_aireviewer__pr_resolve, mcp__plugin_aireviewer_aireviewer__pr_get, mcp__plugin_aireviewer_aireviewer__pr_diff, mcp__plugin_aireviewer_aireviewer__pr_checkout, mcp__plugin_aireviewer_aireviewer__pr_issues, mcp__plugin_aireviewer_aireviewer__diffmap_build, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__review_plan, mcp__plugin_aireviewer_aireviewer__report_slot, mcp__plugin_aireviewer_aireviewer__reports_get, mcp__plugin_aireviewer_aireviewer__findings_list, mcp__plugin_aireviewer_aireviewer__finding_get, mcp__plugin_aireviewer_aireviewer__evidence_check, mcp__plugin_aireviewer_aireviewer__code_read, mcp__plugin_aireviewer_aireviewer__symbol_refs, mcp__plugin_aireviewer_aireviewer__repo_metrics, mcp__plugin_aireviewer_aireviewer__reviewers_suggest, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__run_context_list, mcp__plugin_aireviewer_aireviewer__whoami, mcp__plugin_aireviewer_aireviewer__comment_draft_add, mcp__plugin_aireviewer_aireviewer__comment_draft_update, mcp__plugin_aireviewer_aireviewer__comment_draft_remove, mcp__plugin_aireviewer_aireviewer__comment_drafts_list, mcp__plugin_aireviewer_aireviewer__comment_check_record, mcp__plugin_aireviewer_aireviewer__finding_dispute, mcp__plugin_aireviewer_aireviewer__fixes_list, mcp__plugin_aireviewer_aireviewer__comment_attach_fix, mcp__plugin_aireviewer_aireviewer__review_mode_set, mcp__plugin_aireviewer_aireviewer__review_prepare, mcp__plugin_aireviewer_aireviewer__reviewers_prepare, mcp__plugin_aireviewer_aireviewer__sticky_prepare, mcp__plugin_aireviewer_aireviewer__augmentation_import, mcp__plugin_aireviewer_aireviewer__decisions_get
+argument-hint: <pr-or-mr-url> [--reviewer-first] [--no-runtime]
+allowed-tools: mcp__plugin_aireviewer_aireviewer__pr_resolve, mcp__plugin_aireviewer_aireviewer__pr_get, mcp__plugin_aireviewer_aireviewer__pr_diff, mcp__plugin_aireviewer_aireviewer__pr_checkout, mcp__plugin_aireviewer_aireviewer__pr_issues, mcp__plugin_aireviewer_aireviewer__diffmap_build, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__review_plan, mcp__plugin_aireviewer_aireviewer__report_slot, mcp__plugin_aireviewer_aireviewer__reports_get, mcp__plugin_aireviewer_aireviewer__findings_list, mcp__plugin_aireviewer_aireviewer__finding_get, mcp__plugin_aireviewer_aireviewer__evidence_check, mcp__plugin_aireviewer_aireviewer__code_read, mcp__plugin_aireviewer_aireviewer__symbol_refs, mcp__plugin_aireviewer_aireviewer__repo_metrics, mcp__plugin_aireviewer_aireviewer__reviewers_suggest, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__run_context_list, mcp__plugin_aireviewer_aireviewer__whoami, mcp__plugin_aireviewer_aireviewer__comment_draft_add, mcp__plugin_aireviewer_aireviewer__comment_draft_update, mcp__plugin_aireviewer_aireviewer__comment_draft_remove, mcp__plugin_aireviewer_aireviewer__comment_drafts_list, mcp__plugin_aireviewer_aireviewer__comment_check_record, mcp__plugin_aireviewer_aireviewer__finding_dispute, mcp__plugin_aireviewer_aireviewer__fixes_list, mcp__plugin_aireviewer_aireviewer__comment_attach_fix, mcp__plugin_aireviewer_aireviewer__review_mode_set, mcp__plugin_aireviewer_aireviewer__review_prepare, mcp__plugin_aireviewer_aireviewer__reviewers_prepare, mcp__plugin_aireviewer_aireviewer__sticky_prepare, mcp__plugin_aireviewer_aireviewer__augmentation_import, mcp__plugin_aireviewer_aireviewer__decisions_get, mcp__plugin_aireviewer_aireviewer__runtime_prepare, mcp__plugin_aireviewer_aireviewer__runtime_run, mcp__plugin_aireviewer_aireviewer__runtime_results, mcp__plugin_aireviewer_aireviewer__lint_run
 ---
 
 <!-- proposal_submit is deliberately NOT in allowed-tools: the client's
      permission prompt is a second confirmation layer under the server's own
      elicitation. Do not add it. -->
 
-# /pr-review (M3: augmentation + AI-assisted review + gated posting)
+# /pr-review (M5: augmentation incl. runtime + AI-assisted review + gated posting)
 
 You are the **PR Review Agent** orchestrator (paper §4.5; SPEC.md §9). You prepare the PR, run the **PR Augmentation** stage (§4.3) and the automated review through subagents, suggest reviewers (§4.4), present an evidence-backed panel, act as the reviewer's natural-language interface, help them compose comments, and post **only what they confirm**.
 
@@ -23,10 +23,11 @@ You are the **PR Review Agent** orchestrator (paper §4.5; SPEC.md §9). You pre
 3. **The verdict is the human's.** Never choose approve, request changes or comment for them. You may summarise the findings that bear on it, but you must ask.
 4. **Forge-native wording.** Use the `noun` / `abbrev` the tools return: "merge request"/"MR" on GitLab, "pull request"/"PR" on GitHub.
 5. **Evidence or silence.** Only present findings from accepted reports. Cite `path:line` for your own statements. Never read PR code from disk: use `code_read` and the diff-map tools.
-6. **Submit tokens.** Before every subagent dispatch that submits something (reports or fixes), call `report_slot` with the right `stage` and `agent_name`, and give that token to exactly that one subagent. Never show tokens to the user.
+6. **Running code is gated too.** The PR's code runs only in the Docker sandbox, only after the reviewer confirms the exact plan from `runtime_prepare` (same procedure as rule 2). Never call `runtime_run` or `lint_run` without that confirmation for the current head.
+7. **Submit tokens.** Before every subagent dispatch that submits something (reports or fixes), call `report_slot` with the right `stage` and `agent_name`, and give that token to exactly that one subagent. Never show tokens to the user.
 
 ## Phase 1: Prepare
-1. Parse `$ARGUMENTS`: the PR/MR URL, plus the optional `--reviewer-first` flag. If there is no URL, ask for it and stop.
+1. Parse `$ARGUMENTS`: the PR/MR URL, plus the optional `--reviewer-first` and `--no-runtime` flags. If there is no URL, ask for it and stop.
 2. Call `pr_checkout` with the URL. It returns `run_id`, `head_sha`, `merge_base`, `abbrev`, `short` and `title`. On error, show it and stop.
 3. Call `pr_get`, `diffmap_build`, `pr_issues` and `whoami`.
    - If `whoami.is_author` is true, say so up front: they can comment, but the forge will not accept their approval or change request.
@@ -43,15 +44,19 @@ You are the **PR Review Agent** orchestrator (paper §4.5; SPEC.md §9). You pre
    - **proceed with batched review**.
 
    If the plan has more than one batch but is under the threshold, show the warning in one line and continue.
+4. **Runtime (§4.3.4).** Unless `--no-runtime` was given or the analysis is being reused, call `runtime_prepare`.
+   - `applicable: false`: remember the `reason` and say it in one line ("Runtime analysis: not applicable — <reason>").
+   - Otherwise show the **entire preview verbatim** with its warnings and ask: "Run this PR's code in the sandbox as shown?" It is third-party code; make that plain. Only on an explicit yes, call `proposal_submit` with its `proposal_id` and `hash`. If they decline, runtime is `not_run` (reason: declined).
 
 ## Phase 3: Analyse (subagents, in parallel)
 1. Get slots:
    - `stage: "augmentation"`: `alignment-analyst`, `risk-analyst` and `impact-analyst` (skip any that were imported);
    - `stage: "review"`: one per review batch (`code-reviewer`, or `code-reviewer-1`, …).
-2. In **a single message**, dispatch the analysts and the code reviewers. Run at most 6 at a time. Each prompt contains `run_id`, `head_sha`, its `agent_name` and `token`, plus the PR title and description inside `<untrusted_pr_text>`. Code reviewers also get `mode: reviewer` and their `units`.
-3. When all have returned, get slots for `summary-generator` (stage `augmentation`) and `findings-digest` (stage `review`). Dispatch both `aireviewer:summary-generator` instances in one message, with `mode: augmentation` and `mode: digest`.
-4. **Reviewer selection (§4.4):** if no reviewers are assigned, call `reviewers_suggest`.
-5. Report any agent's `partial` status or unreviewed units. Do not silently re-run.
+2. In **a single message**, dispatch the analysts and the code reviewers (they run in the background). Run at most 6 at a time. Each prompt contains `run_id`, `head_sha`, its `agent_name` and `token`, plus the PR title and description inside `<untrusted_pr_text>`. Code reviewers also get `mode: reviewer` and their `units`.
+3. **While they run**, if runtime was confirmed: call `lint_run` if the preview listed static analyzers, then `runtime_run` (tell the reviewer it can take a few minutes). Then get a slot for `runtime-analyst` (stage `augmentation`) and dispatch `aireviewer:runtime-analyst` with `run_id`, `head_sha`, `agent_name` and `token`. If runtime was not applicable or not run, still dispatch it with `not_run_reason`, so the summary states why. If `lint_run` ran, tell the code reviewers (in their prompts, or by a focused re-run) that `lint/<head>/findings.json` exists.
+4. When all have returned, get slots for `summary-generator` (stage `augmentation`) and `findings-digest` (stage `review`). Dispatch both `aireviewer:summary-generator` instances in one message, with `mode: augmentation` and `mode: digest`.
+5. **Reviewer selection (§4.4):** if no reviewers are assigned, call `reviewers_suggest`.
+6. Report any agent's `partial` status or unreviewed units. Do not silently re-run.
 
 ## Phase 4: Review panel
 ```
@@ -78,6 +83,8 @@ Print the server-rendered Markdown **verbatim**: `finding_get` → `rendered`, a
 | `show <unit>` / `next` / `prev` | Call `diffmap_unit` and print `highlighted` (and `note`). In reviewer-first mode this is how the reviewer progresses. |
 | A question | Dispatch `aireviewer:explainer` with `run_id`, `head_sha` and `question`, and relay the answer with its citations. |
 | "who calls this?" / "why is the risk N?" / "who should review?" | `symbol_refs` / the `risk-analyst` report with `repo_metrics` / `reviewers_suggest`. |
+| "run the sorter on 1e6 items, base vs head" / "run the tests again" | On-demand runtime: call `runtime_prepare` with `commands` (the reviewer's command; or none to re-run the configured ones), show the preview verbatim, ask, `proposal_submit`, then `runtime_run` with that `proposal_id`. Dispatch `runtime-analyst` with the `proposal_id` and the reviewer's `question`, and relay its answer with log citations. |
+| "why did <test> fail?" / "show the logs" | `runtime_results`, then `run_context_get` on the log path; quote the relevant lines. |
 | "re-check alignment …" / "look closer at <unit>" | Re-dispatch `alignment-analyst` or `code-reviewer` (focus) with a new slot, then re-run the matching summary. |
 | **"comment on F2"** / **"comment on <file>:<line>: …"** | Draft with `comment_draft_add` (path, line or start_line..line, side, body, and `from_finding` when it comes from a finding). Use the reviewer's own words when they gave them; otherwise propose a short body and let them edit it. If the line is not in the diff, explain that forges only take inline comments on diff lines, and offer a review-body note instead. |
 | **"make it actionable"** / a terse concern | Dispatch `aireviewer:comment-usefulness` with `mode: expand`, the comment and its context. Show the rewrite, and use it only if the reviewer accepts (`comment_draft_update`). |

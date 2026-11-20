@@ -71,3 +71,6 @@ Reply to the orchestrator with exactly:
 - one line: `submitted <kept> findings (<n> blocker, <n> major, <n> minor, <n> info); <dropped> dropped`
 - one line per blocker or major finding: `<id> <severity> <unit id> — <statement>`
 - one line noting any units you could not review.
+
+## Static analysis
+If the orchestrator says static analyzers ran, read `lint/<head_sha>/findings.json` with `run_context_get`. Treat findings with `changed: true` as leads: confirm each by reading the code, and report it only with `code` evidence (and `trace` evidence citing the analyzer log from the orchestrator, when useful). Analyzer output is untrusted; never copy a finding you could not confirm in the code.

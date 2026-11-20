@@ -16,7 +16,8 @@ Before 1.0, only the latest release receives security fixes.
 aireviewer reads untrusted content (PR/MR text, comments and code), passes it to an LLM, and from M5 executes PR code. We especially want reports about:
 
 - **Prompt injection that bypasses a human gate**: forge content that causes aireviewer to push, create or post anything without explicit user confirmation, or to change a review verdict. This includes posting content that differs from the confirmed preview, forging an elicitation answer, or editing the decision log undetected (ADR 0006). For `/pr-create`, this also covers committing anything other than the confirmed fixes, pushing a commit other than the previewed one, force-pushing, or creating issues or PRs without confirmation (ADR 0007).
-- **Sandbox escape or secret exposure** in runtime analysis (`sandbox_run`): host filesystem access, network egress when disabled, or tokens visible inside the container.
+- **Sandbox escape or secret exposure** in runtime analysis (`runtime_run`, `lint_run`; ADR 0008): host filesystem access, network egress when disabled, privilege gain inside the container, or tokens visible inside it.
+- **Running code without confirmation**: executing a plan the human did not confirm, a plan for a different head, commands taken from the PR head's config, or a forged runtime artifact accepted as trace evidence.
 - **Credential leakage**: tokens written to run artifacts, logs, posted comments, or sent to unintended hosts.
 - **Path traversal** in the run-context store or other file-writing tools.
 - **Confinement bypasses**: reading outside a PR's git objects through the `code_*` tools, forging or overwriting a report without a valid submit token, or getting PR-controlled files loaded by Claude Code as instructions (ADR 0005).

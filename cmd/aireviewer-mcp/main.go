@@ -27,6 +27,7 @@ import (
 	"github.com/husobee/aireviewer/internal/mcpserver"
 	"github.com/husobee/aireviewer/internal/providers"
 	"github.com/husobee/aireviewer/internal/runctx"
+	"github.com/husobee/aireviewer/internal/sandbox"
 )
 
 // version is set by -ldflags at release time.
@@ -83,6 +84,7 @@ func main() {
 		Store:     runctx.New(*root),
 		Tokens:    reg.Tokens,
 		CacheDir:  cache,
+		Sandbox:   sandbox.Docker{},
 	})
 	if cmd := flag.Arg(0); cmd == "diffmap" || cmd == "augment" {
 		if flag.NArg() != 2 {

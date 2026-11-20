@@ -439,7 +439,7 @@ All four analysts run **in parallel**: each needs only the diff, the issue conte
   The analyst explains the score but cannot change it.
 - **Impact.** `symbol_refs` runs a word-boundary `git grep` at head for the symbols of modified and deleted units. It excludes the definition itself, and scopes unexported Go identifiers to their package. It reports the fan-in (distinct referencing files, used as centrality), dangling references to deleted symbols, a common-identifier warning, and changed interface files (proto, OpenAPI, GraphQL, schemas, migrations). Matching is textual, and the analyst verifies important references with `code_read`.
 - **Summary.** `summary-generator` runs in two modes. In `augmentation` mode it plays the paper's role and synthesises the analysts, with facets copied exactly and contradictions surfaced. In `digest` mode (agent name `findings-digest`) it summarises the code-review findings.
-- **Runtime.** Arrives in M5. Until then, the summary states "runtime evidence: not available".
+- **Runtime (M5; ADR 0008).** `runtime_prepare` freezes a plan from the merge-base config (image, setup, commands, analyzers, network, limits) as a `runtime` proposal. Nothing runs until the human confirms it. `runtime_run` then runs each command on the merge base and the head in locked-down containers: non-root, no capabilities, read-only root filesystem, no network by default, limits, and a `git archive` copy of the code. Failures are re-run `runtime.reruns` times and classified per test (`go test -json`) or per command, then compared base vs head. Logs are `runtime/` artifacts and the counts are metrics. `lint_run` runs `static_analysis` on the head the same way and marks findings in the diff. Without config or Docker, the runtime-analyst reports `not_applicable` with the reason.
 
 | Agent | Inputs / tools | Required output (beyond §6) |
 |---|---|---|
@@ -535,7 +535,7 @@ runtime:
 
 risk:
   bugfix_keywords: [fix, bug, hotfix, regression]
-  bug_labels: [bug, incident]
+  bug_labels: [bug, incident]   # M6: merged PRs/MRs with these labels count as bug fixes
   min_history_commits: 20   # below this → low confidence
 
 reviewers:
@@ -581,8 +581,9 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `pr_issues(run_id)` | Linked issues (closing references plus closing keywords) saved for agents and issue-quote validation |
 | `repo_metrics(run_id)` | Change frequency, hotspots, bug-fix history, authors, deterministic risk score (records metrics) |
 | `symbol_refs(run_id, units?)` | References and fan-in of changed symbols, dangling refs, interface files (records metrics) |
-| `lint_run(cmd)` | Run configured analyzers in the sandbox; return normalised findings |
-| `sandbox_run(spec)` | Base vs head execution, reruns, artifacts |
+| `runtime_prepare(run_id, commands?)` | Freeze a sandbox plan (merge-base config, or on-demand commands) as a `runtime` proposal; `not_applicable` with the reason otherwise (ADR 0008) |
+| `runtime_run(run_id, proposal_id?)` · `runtime_results(run_id, proposal_id?)` | Execute a **confirmed** plan on base and head with reruns and classification; read the results |
+| `lint_run(run_id, proposal_id?)` | Run the confirmed plan's analyzers on the head; findings normalised and marked against the diff-map |
 | `issues_search(run_id, queries[])` · `issue_get(run_id, number)` | Issue retrieval for a branch run (§8.2 v1) |
 | `branch_checkout(branch?, base?, remote?)` · `create_context(run_id)` · `create_draft_get/update(run_id, …)` · `create_prepare(run_id)` | `/pr-create` branch runs and the Gate 1 draft (M4; ADR 0007). The ✎ writes below (`git_apply_patch`, `issue_create`, `git_push`, `pr_create`) are not separate tools: `proposal_submit` performs them, in order, for a confirmed `create` proposal |
 | `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
@@ -599,7 +600,7 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 ## 15. Security & privacy
 
 - **Prompt injection.** Fetched PR and issue text and code are untrusted. Subagents receive them inside clearly delimited data blocks and have no write tools. Orchestrators never act on instructions found in fetched content.
-- **Running untrusted code.** `sandbox_run` runs only in Docker with network off by default, no host mounts beyond a read-only worktree copy, no tokens in the environment, and CPU, memory and time limits. Reviewing a PR from a fork never runs code without an explicit `--allow-runtime` confirmation.
+- **Running untrusted code.** Code runs only in Docker and only after the human confirms the exact plan for the current head (ADR 0008). That confirmation applies to every PR, forks included. Containers run with no network by default, no host mounts beyond a read-only `git archive` copy, no tokens, a non-root user, no capabilities, a read-only root filesystem, and CPU, memory, process and time limits.
 - **Data egress.** Code and PR content go to the model provider configured for Claude Code and nowhere else. Memory is local unless explicitly posted.
 - **Accountability.** Every posted artifact is attributable to the human who passed the gate, and AI involvement is disclosed through the provenance footer.
 
@@ -626,8 +627,8 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M2** ✅ (agent prompts not yet evaluated) | Augmentation analysts (alignment, risk + `repo_metrics`, impact + `symbol_refs`); `pr_issues`; `reviewers_suggest`; `.aireviewer.yml` read from the merge base; issue-quote evidence and report `facets`; risk-ordered diff-map. **Moved to M3:** the sticky comment with marker reuse, because posting is a gated write and imported reports must be re-validated. **Also:** fetch linked (closing) issues in `/pr-review` and feed them to every analyst, the reviewer and the explainer; for PRs with no link, an issue-link *suggestion* in `/pr-review`; `reviewers_suggest` in `/pr-review` when nobody is assigned (requesting still gated); `summary-generator` returns to the paper's role of synthesising the four analysts, and the findings digest becomes separate | Augmentation reused across machines; staleness by head SHA works |
 | **M3** ✅ (agent prompts not yet evaluated; see ADR 0006) | Comment pipeline (toxicity, usefulness, fix-suggester, suggestion blocks); Gate 2; `review_submit` on both forges; **gated** `reviewers_request` and `sticky_comment_upsert`. Reports imported from a sticky comment are re-validated against the local checkout and trusted only when authored by the current user or a configured bot. **Also (paper §5):**<br>• **circuit breaker:** low-confidence claims, or any claim the reviewer disputes, stop downstream use (fix generation, posting) until a human confirms (l.1802);<br>• **append-only decision log:** a hash-chained record of every gate decision, posted artifact and override (l.1687);<br>• optional **"PR Critique" checkpoint:** before submitting, the reviewer must add their own architectural or mentorship note (l.1748);<br>• **reviewer-first mode:** AI findings stay hidden until the reviewer has walked the diff-map (§5.1.8 automation bias);<br>• the self-review warning | Posted batched review with inline suggestions on GH and GL |
 | **M4** ✅ (agent prompts not yet evaluated; see ADR 0007) | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion. **Moved to M5:** `lint_run`, because analyzers run in the sandbox | Branch → PR with linked issue and applied fixes, human-approved |
-| **M5** | `runtime-analyst` + `sandbox_run` (base/head, reruns, flakiness); `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
-| **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497) | Metrics dashboard data accumulates; CI posts augmentation automatically |
+| **M5** ✅ (agent prompt not yet evaluated; see ADR 0008) | `runtime-analyst` + sandboxed `runtime_run` (base/head, reruns, flakiness), gated by a confirmed `runtime` plan; `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
+| **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497). **Also (risk, §10):** `risk.bug_labels`. A commit counts as a bug fix when its subject matches `bugfix_keywords` **or** it belongs to a merged PR/MR carrying one of the labels (resolved through the forge API, cached per repository, anchored to the merge base). `repo_metrics` records how many fixes were found by keyword, by label or both, and still works offline from keywords alone when the forge lookup is unavailable | Metrics dashboard data accumulates; CI posts augmentation automatically; label-based bug-fix counts appear in `repo_metrics` |
 
 ---
 
@@ -643,6 +644,7 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | Real-time toxicity/usefulness checks in the comment box | Checks at composition time in the CLI | No browser extension in v1 |
 | Toxicity and usefulness checks in the comment box | Applied only to comments composed through aireviewer | Comments typed directly in the GitHub or GitLab UI bypass both checks. We cannot intercept the forge UI |
 | Author-mode review catches style and bikeshedding before review (§4.2.3) | Style findings (`info`) only in author mode; skipped in reviewer mode unless a policy requires them | Reviewer-mode bikeshedding is exactly what §4.5.5 tries to prevent |
+| Runtime analysis as an automatic stage (§4.3.4) | Runs only after the human confirms the exact plan, for each head | It executes third-party code on the reviewer's machine; the confirmation is the same gate as a forge write |
 | PR abandonment (§4.5.6) | Not modelled | No agent action is needed; the retrospective can still be run manually |
 | Gate 1 approves each artifact (§4.2.5) | Each fix is approved individually during revision, then one frozen proposal covering commit, issue, push and PR is confirmed | The preview shows every step and its content; confirming steps separately would leave half-created states |
 | PRs from any contributor setup | Same-repository branches only in v1 | Fork PRs need a second remote and cross-repository head handling |

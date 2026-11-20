@@ -10,10 +10,13 @@
 //	M3: comment drafts and checks, fixes, *_prepare, proposal_submit, decisions_get
 //	M4: branch_checkout, create_context, issues_search, issue_get,
 //	    create_draft_get/update, create_prepare
+//	M5: runtime_prepare, runtime_run, runtime_results, lint_run (runtime.go)
 //
 // Exactly one tool writes outside the run directory: proposal_submit. It
 // posts to the forge (and, for /pr-create, commits the confirmed fixes and
 // pushes) only for a frozen proposal the human confirmed (ADR 0003, 0006, 0007).
+// runtime_run and lint_run execute code only in the Docker sandbox, and only
+// for a runtime plan the human confirmed the same way (ADR 0008).
 package mcpserver
 
 import (
@@ -31,6 +34,7 @@ import (
 	"github.com/husobee/aireviewer/internal/forge"
 	"github.com/husobee/aireviewer/internal/gitrepo"
 	"github.com/husobee/aireviewer/internal/runctx"
+	"github.com/husobee/aireviewer/internal/sandbox"
 )
 
 // ProviderSource returns a provider for a repo. *providers.Registry satisfies it.
@@ -53,6 +57,9 @@ type Config struct {
 	RemoteFor func(repo forge.Repo, token string) gitrepo.Remote
 	// Now overrides the clock (tests).
 	Now func() time.Time
+	// Sandbox runs untrusted code for runtime analysis and static analyzers
+	// (M5). nil disables both (they report not_applicable).
+	Sandbox sandbox.Runner
 }
 
 // New builds the MCP server with all M0 tools registered.
@@ -93,6 +100,7 @@ func New(cfg Config) *mcp.Server {
 	registerAugmentTools(s, h)
 	registerGateTools(s, h)
 	registerCreateTools(s, h)
+	registerRuntimeTools(s, h)
 	return s
 }
 
@@ -325,6 +333,13 @@ func writableNote(rel string) bool {
 	clean := path.Clean(strings.ReplaceAll(rel, "\\", "/"))
 	if strings.HasPrefix(clean, "notes/") {
 		return true
+	}
+	// Directories written only by tools: a note there could pose as a runtime
+	// log (trace evidence), a report, a proposal or gate state.
+	for _, d := range []string{"runtime/", "sandbox/", "lint/", "review/", "augmentation/", "create/", "proposals/"} {
+		if strings.HasPrefix(clean, d) {
+			return false
+		}
 	}
 	return strings.HasSuffix(clean, ".md") && !strings.HasPrefix(path.Base(clean), ".")
 }

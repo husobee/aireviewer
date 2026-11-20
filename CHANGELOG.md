@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M5: sandboxed runtime analysis; ADR 0008)
+- `runtime_prepare` → confirmed `runtime` proposal → `runtime_run`. Each command runs on the merge base and the head in Docker, and failures are re-run `runtime.reruns` times. Results are classified per test (`go test -json`) or per command as `pass`, `deterministic_fail`, `flaky` or `timeout`, then compared base vs head (`new_failure`, `fixed`, `still_failing`, `flaky`, …). Logs are `runtime/` trace artifacts and counts are metrics.
+- Container isolation:
+  - a `git archive` copy of the code;
+  - non-root (UID 65534), all capabilities dropped, `no-new-privileges`, read-only root filesystem;
+  - no network by default (`runtime.network`, `runtime.setup_network`);
+  - CPU, memory, process and time limits;
+  - no credentials;
+  - volumes removed after each run.
+- `lint_run`: configured `static_analysis` commands in the sandbox, findings normalised (golangci-lint JSON or `file:line:col: message`) and marked `in_diff` / `changed` for the code reviewer.
+- On-demand runs ("run X base vs head") through the same confirmation, and `runtime_results`.
+- Agent: `runtime-analyst` (Sonnet). The summary generator, explainer and code reviewer now use runtime and analyzer results.
+- `/pr-review` (`--no-runtime`) and `/pr-create` run the sandbox steps after confirmation.
+- Config: `runtime.setup_network`, `runtime.memory`, `runtime.cpus`, `runtime.env`.
+
+### Security
+- `run_context_put` can no longer write into tool-owned directories (`runtime/`, `lint/`, `review/`, `augmentation/`, `create/`, `proposals/`, `sandbox/`), so a note cannot pose as an execution log or gate state.
+
 ### Added (M4: PR creation; ADR 0007)
 - `/pr-create [branch] [--base] [--issue] [--draft] [--fast]`: preflight (skips creation when an open PR exists), detail generation from the diff, commits and the repo template, issue linking with 0–1 scores and a drafted issue when none fits, an author-mode code review, validated fix patches, Gate 1 revision, then one confirmed submission, followed by augmentation and reviewer suggestions on the new PR.
 - Branch runs: `branch_checkout` fetches the local branch into the mirror, so every review-side tool works before a PR exists.

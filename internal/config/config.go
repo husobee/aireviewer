@@ -57,6 +57,25 @@ type Config struct {
 		AllowCreate       *bool   `yaml:"allow_create" json:"allow_create" jsonschema:"whether /pr-create may propose and create a new issue (default true)"`
 		MaxCandidates     int     `yaml:"max_candidates" json:"max_candidates"`
 	} `yaml:"issue_link" json:"issue_link"`
+	// Runtime configures sandboxed execution (SPEC §10 runtime-analyst, M5).
+	// Like the rest of the file it is read from the merge base, so a PR
+	// cannot choose the image, the commands or the network setting.
+	Runtime struct {
+		Enabled      bool              `yaml:"enabled" json:"enabled"`
+		Image        string            `yaml:"image" json:"image"`
+		Setup        []string          `yaml:"setup" json:"setup"`
+		Commands     []string          `yaml:"commands" json:"commands"`
+		Reruns       int               `yaml:"reruns" json:"reruns"`
+		Network      bool              `yaml:"network" json:"network"`
+		SetupNetwork bool              `yaml:"setup_network" json:"setup_network"`
+		TimeoutS     int               `yaml:"timeout_s" json:"timeout_s"`
+		Memory       string            `yaml:"memory" json:"memory"`
+		CPUs         string            `yaml:"cpus" json:"cpus"`
+		Env          map[string]string `yaml:"env" json:"env"`
+	} `yaml:"runtime" json:"runtime"`
+	// StaticAnalysis commands run in the sandbox before the code review;
+	// their findings become evidence (SPEC §8 step 4).
+	StaticAnalysis []string `yaml:"static_analysis" json:"static_analysis"`
 	// Create configures /pr-create commits.
 	Create struct {
 		Signoff bool `yaml:"signoff" json:"signoff" jsonschema:"add a DCO Signed-off-by trailer to the fix commit"`
@@ -94,6 +113,10 @@ func Default() Config {
 	c.IssueLink.Threshold = 0.7
 	c.IssueLink.IncludeClosedDays = 30
 	c.IssueLink.MaxCandidates = 20
+	c.Runtime.Reruns = 3
+	c.Runtime.TimeoutS = 900
+	c.Runtime.Memory = "4g"
+	c.Runtime.CPUs = "2"
 	return c
 }
 
@@ -160,5 +183,27 @@ func Parse(data []byte) (Config, error) {
 		c.IssueLink.MaxCandidates = min(in.IssueLink.MaxCandidates, 50)
 	}
 	c.Create = in.Create
+	r := in.Runtime
+	c.Runtime.Enabled, c.Runtime.Image, c.Runtime.Setup, c.Runtime.Commands = r.Enabled, r.Image, r.Setup, r.Commands
+	c.Runtime.Network, c.Runtime.SetupNetwork, c.Runtime.Env = r.Network, r.SetupNetwork, r.Env
+	if r.Reruns != 0 {
+		if r.Reruns < 0 || r.Reruns > 10 {
+			return c, fmt.Errorf(".aireviewer.yml: runtime.reruns %d must be between 0 and 10", r.Reruns)
+		}
+		c.Runtime.Reruns = r.Reruns
+	}
+	if r.TimeoutS != 0 {
+		if r.TimeoutS < 1 || r.TimeoutS > 7200 {
+			return c, fmt.Errorf(".aireviewer.yml: runtime.timeout_s %d must be between 1 and 7200", r.TimeoutS)
+		}
+		c.Runtime.TimeoutS = r.TimeoutS
+	}
+	if r.Memory != "" {
+		c.Runtime.Memory = r.Memory
+	}
+	if r.CPUs != "" {
+		c.Runtime.CPUs = r.CPUs
+	}
+	c.StaticAnalysis = in.StaticAnalysis
 	return c, nil
 }

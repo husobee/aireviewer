@@ -857,6 +857,15 @@ func (h *handlers) saveProposal(runID string, p *Proposal) error {
 	return h.saveJSON(runID, "proposals/"+p.ID+".json", p)
 }
 
+// proposalIntact reports whether the stored payload still matches its hash.
+func proposalIntact(p *Proposal) bool {
+	var c bytes.Buffer
+	if json.Compact(&c, p.Payload) != nil {
+		return false
+	}
+	return p.Hash == sha(p.Kind+"\x00"+p.HeadSHA+"\x00"+c.String())
+}
+
 func freeze(kind, head string, payload any, preview string, now time.Time) (*Proposal, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -1248,11 +1257,7 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 	if p.Submitted {
 		return nil, SubmitProposalOut{}, fmt.Errorf("proposal %s was already submitted", p.ID)
 	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, p.Payload); err != nil {
-		return nil, SubmitProposalOut{}, fmt.Errorf("proposal %s is corrupt: %w", p.ID, err)
-	}
-	if in.Hash != p.Hash || p.Hash != sha(p.Kind+"\x00"+p.HeadSHA+"\x00"+compact.String()) {
+	if in.Hash != p.Hash || !proposalIntact(&p) {
 		return nil, SubmitProposalOut{}, errors.New("hash mismatch: the proposal changed or the wrong hash was given; prepare it again")
 	}
 	if p.HeadSHA != st.HeadSHA {
@@ -1263,13 +1268,18 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		prov forge.Provider
 	)
 	where := fmt.Sprintf("%s (new %s from %s into %s)", st.Repo.Project, st.Repo.Forge.Abbrev(), st.HeadBranch, st.BaseBranch)
-	if p.Kind != "create" {
+	switch p.Kind {
+	case "runtime":
+		where = "the local Docker sandbox (code at " + short(st.HeadSHA) + ")"
+	case "create":
+		if !st.isBranch() {
+			return nil, SubmitProposalOut{}, errors.New("a create proposal belongs to a branch run")
+		}
+	default:
 		if pr, prov, err = h.freshPR(ctx, st); err != nil {
 			return nil, SubmitProposalOut{}, err
 		}
 		where = fmt.Sprintf("%s %s", st.Repo.Forge.Abbrev(), pr.Ref)
-	} else if !st.isBranch() {
-		return nil, SubmitProposalOut{}, errors.New("a create proposal belongs to a branch run")
 	}
 	mech, ok, reason, ask, err := h.confirm(req, &p, where)
 	if ask != nil {
@@ -1293,6 +1303,12 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 	switch p.Kind {
 	case "create":
 		res, err = h.submitCreate(ctx, in.RunID, st, &p)
+	case "runtime":
+		var note string
+		if note, err = h.allowRuntime(in.RunID, st, &p); err == nil {
+			res = forge.PostResult{Notes: []string{note}}
+			_, _ = h.logEvent(in.RunID, "runtime_allowed", "human", map[string]any{"id": p.ID, "hash": p.Hash})
+		}
 	case "review":
 		rp, ok := prov.(forge.ReviewPoster)
 		if !ok {

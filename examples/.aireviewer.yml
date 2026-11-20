@@ -18,18 +18,22 @@ policies:
 static_analysis:
   - "golangci-lint run --output.json.path stdout ./..."
 
-runtime:
+runtime:                     # sandboxed execution; every run needs your confirmation (ADR 0008)
   enabled: true
-  image: golang:1.26
-  setup: ["go mod download"]
-  commands: ["go build ./...", "go test ./... -json"]
-  reruns: 3
-  network: false
-  timeout_s: 900
+  image: golang:1.26           # pin by digest (golang:1.26@sha256:…) so the image cannot change between runs
+  setup: ["go mod download"]   # runs once per side before the commands
+  setup_network: true          # network for setup only (dependency downloads)
+  commands: ["go build ./...", "go test -json ./..."]   # -json gives per-test flaky detection
+  reruns: 3                    # failures are re-run this many times before classification
+  network: false               # network for commands and analyzers
+  timeout_s: 900               # per command
+  memory: 4g
+  cpus: "2"
+  # env: { GOFLAGS: "-mod=mod" }
 
 risk:
   bugfix_keywords: [fix, bug, hotfix, regression]
-  bug_labels: [bug, incident]
+  bug_labels: [bug, incident]   # not active yet (M6): merged PRs/MRs with these labels will count as bug fixes
   min_history_commits: 20
 
 reviewers:

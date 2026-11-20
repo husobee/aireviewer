@@ -302,6 +302,33 @@ func (g *Git) LsTree(ctx context.Context, sha, prefix string) ([]string, error) 
 	return files, nil
 }
 
+// Archive exports the tree at sha into dir (which must exist and be empty)
+// with `git archive | tar -x`, never touching a worktree. Used to give the
+// sandbox a copy of the code (ADR 0008).
+func (g *Git) Archive(ctx context.Context, sha, dir string) error {
+	ar := exec.CommandContext(ctx, "git", "archive", "--format=tar", sha) //nolint:gosec // fixed argv
+	ar.Env = append(g.env(), "GIT_DIR="+g.Dir)
+	tx := exec.CommandContext(ctx, "tar", "-x", "--no-same-owner", "-C", dir) //nolint:gosec // fixed argv
+	pipe, err := ar.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	tx.Stdin = pipe
+	var aerr, terr bytes.Buffer
+	ar.Stderr, tx.Stderr = &aerr, &terr
+	if err := tx.Start(); err != nil {
+		return err
+	}
+	if err := ar.Run(); err != nil {
+		_ = tx.Wait()
+		return fmt.Errorf("git archive %s: %w: %s", sha, err, strings.TrimSpace(aerr.String()))
+	}
+	if err := tx.Wait(); err != nil {
+		return fmt.Errorf("extract archive: %w: %s", err, strings.TrimSpace(terr.String()))
+	}
+	return nil
+}
+
 // CacheDir returns the cache root: $AIREVIEWER_CACHE_DIR or <user cache>/aireviewer.
 func CacheDir() (string, error) {
 	if d := os.Getenv("AIREVIEWER_CACHE_DIR"); d != "" {
