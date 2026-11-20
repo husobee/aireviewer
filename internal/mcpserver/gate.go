@@ -1329,7 +1329,7 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 			return nil, SubmitProposalOut{}, err
 		}
 		res, err = rr.RequestReviewers(ctx, pr, users)
-	case "sticky":
+	case "sticky", "retro":
 		mc, ok := prov.(forge.MarkerCommenter)
 		if !ok {
 			return nil, SubmitProposalOut{}, errors.New("this forge adapter cannot post comments")

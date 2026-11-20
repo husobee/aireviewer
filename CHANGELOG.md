@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M6a: retrospectives, memory, bug labels; ADR 0010)
+- `/pr-retro <url>`:
+  - deterministic `review_metrics` (time to first review, decision latency, review rounds, commits after review started, comments by origin, AI findings posted and disputed, check-flag rates, overrides);
+  - a `retro-summarizer` report;
+  - an optional final PR comment (`retro_prepare`, gated);
+  - optional local memory.
+- Local memory (`memory_save`, `memory_query`, `memory_forget`) under the user's data directory, honouring `memory.enabled` / `memory.retention_days`. The code reviewer, the explainer and `/pr-review` can query past decisions as untrusted context.
+- `risk.bug_labels`: bug-labelled merged PRs/MRs count as fixes alongside keywords (GitHub search OR, GitLab per label), cached daily. `repo_metrics` reports fixes by keyword, by label, and both, falling back to keywords when the forge is unavailable.
+- Forge adapters: review activity (reviews, approvals, comments, commits) and labelled-PR commits on both forges.
+
 ### Added (M5.1: reviewer voice; ADR 0009)
 - `voice_get`, `voice_set`, `voice_clear`: a personal voice profile (description plus up to 5 example comments) stored in the reviewer's configuration directory, combined with an optional team default (`comments.voice`, read from the merge base). The personal voice takes precedence.
 - `/pr-review` words the comments and review bodies it proposes in the voice. The toxicity and usefulness agents use it only to word their rewrites, never for verdicts. The reviewer's own words are never restyled.

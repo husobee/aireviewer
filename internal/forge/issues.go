@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+// BugLabeler finds the commits of merged PRs that carry any of the given
+// labels, merged in [since, until] (M6, risk.bug_labels). The set contains
+// each PR's own commits and its merge or squash commit, so it matches
+// whichever of them appear in non-merge history. prs is how many labelled
+// PRs were found; limit caps them.
+type BugLabeler interface {
+	LabelledFixCommits(ctx context.Context, repo Repo, labels []string, since, until time.Time, limit int) (commits map[string]bool, prs int, err error)
+}
+
 // Issue is a normalised issue linked to a PR.
 type Issue struct {
 	Ref    string   `json:"ref" jsonschema:"forge-native reference, e.g. o/r#12 or g/p#12"`

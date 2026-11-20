@@ -79,10 +79,32 @@ func TestHistoryRiskExpertise(t *testing.T) {
 	}
 	// Anchor at a fixed time for deterministic assertions.
 	now = base
-	st := Stats(now, commits, []string{"hot.go", "cold.go", "new.go"}, BugfixRE([]string{"fix", "bug"}))
+	st := Stats(now, commits, []string{"hot.go", "cold.go", "new.go"}, BugfixRE([]string{"fix", "bug"}), nil)
 	hot := st["hot.go"]
 	if hot.Commits365 != 6 || hot.Bugfix365 != 3 || hot.Authors365 != 3 || hot.Commits90 != 5 || hot.Commits30 != 1 || hot.LastChangeDays != 25 {
 		t.Errorf("hot = %+v", hot)
+	}
+	if hot.BugfixKeyword365 != 3 || hot.BugfixLabel365 != 0 {
+		t.Errorf("keyword-only sources = %+v", hot)
+	}
+	// A bug-labelled PR's commit counts even without a fix keyword, and a
+	// commit found both ways is counted once.
+	var feature0, fix1 string
+	for _, c := range commits {
+		switch c.Subject {
+		case "feature 0":
+			feature0 = c.SHA
+		case "fix crash 1":
+			fix1 = c.SHA
+		}
+	}
+	labelled := map[string]bool{feature0: true, fix1: true}
+	ls := Stats(now, commits, []string{"hot.go"}, BugfixRE([]string{"fix", "bug"}), labelled)["hot.go"]
+	if ls.Bugfix365 != 4 || ls.BugfixKeyword365 != 3 || ls.BugfixLabel365 != 2 {
+		t.Errorf("with labels = %+v", ls)
+	}
+	if kw, lb, both := BugSources(commits, BugfixRE([]string{"fix", "bug"}), labelled); kw != 2 || lb != 1 || both != 1 {
+		t.Errorf("sources = %d keyword-only, %d label-only, %d both", kw, lb, both)
 	}
 	if st["new.go"].Commits365 != 0 || st["new.go"].LastChangeDays != -1 {
 		t.Errorf("new = %+v", st["new.go"])

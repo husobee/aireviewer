@@ -33,7 +33,7 @@ runtime:                     # sandboxed execution; every run needs your confirm
 
 risk:
   bugfix_keywords: [fix, bug, hotfix, regression]
-  bug_labels: [bug, incident]   # not active yet (M6): merged PRs/MRs with these labels will count as bug fixes
+  bug_labels: [bug, incident]   # merged PRs/MRs with these labels count as bug fixes (cached daily)
   min_history_commits: 20
 
 reviewers:
@@ -65,6 +65,6 @@ limits:
   max_parallel_agents: 6
   lazy_fix_suggestions: true
 
-memory:
+memory:                      # local retrospective memory on each reviewer's machine (ADR 0010)
   enabled: true
-  retention_days: 365
+  retention_days: 365        # older entries are pruned; 0 keeps everything

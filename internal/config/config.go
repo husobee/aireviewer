@@ -23,6 +23,7 @@ type Weights struct {
 type Config struct {
 	Risk struct {
 		BugfixKeywords    []string `yaml:"bugfix_keywords" json:"bugfix_keywords"`
+		BugLabels         []string `yaml:"bug_labels" json:"bug_labels" jsonschema:"merged PRs/MRs with any of these labels count as bug fixes"`
 		MinHistoryCommits int      `yaml:"min_history_commits" json:"min_history_commits"`
 		HighRisk          int      `yaml:"high_risk" json:"high_risk"`
 	} `yaml:"risk" json:"risk"`
@@ -79,6 +80,11 @@ type Config struct {
 	// StaticAnalysis commands run in the sandbox before the code review;
 	// their findings become evidence (SPEC §8 step 4).
 	StaticAnalysis []string `yaml:"static_analysis" json:"static_analysis"`
+	// Memory configures the local retrospective memory (SPEC §11.2).
+	Memory struct {
+		Enabled       *bool `yaml:"enabled" json:"enabled"`
+		RetentionDays int   `yaml:"retention_days" json:"retention_days" jsonschema:"entries older than this are deleted (default 365; 0 = keep)"`
+	} `yaml:"memory" json:"memory"`
 	// Create configures /pr-create commits.
 	Create struct {
 		Signoff bool `yaml:"signoff" json:"signoff" jsonschema:"add a DCO Signed-off-by trailer to the fix commit"`
@@ -93,6 +99,11 @@ func (c Config) Footer() bool {
 // AllowIssueCreate reports whether /pr-create may create issues (default true).
 func (c Config) AllowIssueCreate() bool {
 	return c.IssueLink.AllowCreate == nil || *c.IssueLink.AllowCreate
+}
+
+// MemoryEnabled reports whether retrospectives may be kept (default true).
+func (c Config) MemoryEnabled() bool {
+	return c.Memory.Enabled == nil || *c.Memory.Enabled
 }
 
 // Breaker reports whether the low-confidence circuit breaker is on (default true).
@@ -116,6 +127,7 @@ func Default() Config {
 	c.IssueLink.Threshold = 0.7
 	c.IssueLink.IncludeClosedDays = 30
 	c.IssueLink.MaxCandidates = 20
+	c.Memory.RetentionDays = 365
 	c.Runtime.Reruns = 3
 	c.Runtime.TimeoutS = 900
 	c.Runtime.Memory = "4g"
@@ -136,6 +148,7 @@ func Parse(data []byte) (Config, error) {
 	if len(in.Risk.BugfixKeywords) > 0 {
 		c.Risk.BugfixKeywords = in.Risk.BugfixKeywords
 	}
+	c.Risk.BugLabels = in.Risk.BugLabels
 	if in.Risk.MinHistoryCommits > 0 {
 		c.Risk.MinHistoryCommits = in.Risk.MinHistoryCommits
 	}
@@ -212,5 +225,12 @@ func Parse(data []byte) (Config, error) {
 		c.Runtime.CPUs = r.CPUs
 	}
 	c.StaticAnalysis = in.StaticAnalysis
+	c.Memory.Enabled = in.Memory.Enabled
+	if in.Memory.RetentionDays < 0 {
+		return c, fmt.Errorf(".aireviewer.yml: memory.retention_days must not be negative")
+	}
+	if in.Memory.RetentionDays > 0 {
+		c.Memory.RetentionDays = in.Memory.RetentionDays
+	}
 	return c, nil
 }

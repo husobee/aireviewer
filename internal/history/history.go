@@ -86,10 +86,28 @@ type FileStats struct {
 	Commits30         int     `json:"commits_30d"`
 	Commits90         int     `json:"commits_90d"`
 	Commits365        int     `json:"commits_365d"`
-	Bugfix365         int     `json:"bugfix_365d"`
+	Bugfix365         int     `json:"bugfix_365d" jsonschema:"bug-fix commits: matched by keyword or by a bug-labelled PR"`
+	BugfixKeyword365  int     `json:"bugfix_keyword_365d" jsonschema:"of which matched by commit-subject keyword"`
+	BugfixLabel365    int     `json:"bugfix_label_365d" jsonschema:"of which belong to a merged PR/MR with a bug label"`
 	Authors365        int     `json:"authors_365d"`
 	LastChangeDays    int     `json:"last_change_days" jsonschema:"days before the merge base; -1 if none in window"`
 	HotspotPercentile float64 `json:"hotspot_percentile" jsonschema:"share of repository files changed less often in the window (0..1)"`
+}
+
+// BugSources counts the window's bug-fix commits by how they were found.
+func BugSources(commits []Commit, bug *regexp.Regexp, labelled map[string]bool) (keywordOnly, labelOnly, both int) {
+	for _, c := range commits {
+		kw, lb := bug.MatchString(c.Subject), labelled[c.SHA]
+		switch {
+		case kw && lb:
+			both++
+		case kw:
+			keywordOnly++
+		case lb:
+			labelOnly++
+		}
+	}
+	return
 }
 
 // BugfixRE builds the bug-fix subject matcher from keywords.
@@ -102,8 +120,10 @@ func BugfixRE(keywords []string) *regexp.Regexp {
 }
 
 // Stats computes FileStats for paths, plus the hotspot percentile against
-// every file touched in the window.
-func Stats(now time.Time, commits []Commit, paths []string, bug *regexp.Regexp) map[string]*FileStats {
+// every file touched in the window. A commit is a bug fix when its subject
+// matches bug or its SHA is in labelled (commits of bug-labelled PRs; may
+// be nil).
+func Stats(now time.Time, commits []Commit, paths []string, bug *regexp.Regexp, labelled map[string]bool) map[string]*FileStats {
 	perFile := map[string]int{}
 	for _, c := range commits {
 		for _, f := range c.Files {
@@ -124,7 +144,7 @@ func Stats(now time.Time, commits []Commit, paths []string, bug *regexp.Regexp) 
 	}
 	for _, c := range commits {
 		age := now.Sub(c.Time)
-		isBug := bug.MatchString(c.Subject)
+		byKW, byLabel := bug.MatchString(c.Subject), labelled[c.SHA]
 		for _, f := range c.Files {
 			s, ok := out[f]
 			if !ok {
@@ -137,8 +157,14 @@ func Stats(now time.Time, commits []Commit, paths []string, bug *regexp.Regexp) 
 			if age <= 30*24*time.Hour {
 				s.Commits30++
 			}
-			if isBug {
+			if byKW || byLabel {
 				s.Bugfix365++
+			}
+			if byKW {
+				s.BugfixKeyword365++
+			}
+			if byLabel {
+				s.BugfixLabel365++
 			}
 			authors[f][c.Email] = true
 			if d := int(age.Hours() / 24); s.LastChangeDays < 0 || d < s.LastChangeDays {

@@ -487,6 +487,11 @@ Weights come from config. The tool can switch to "expertise first" when `risk_sc
 - Output is stored in `.aireviewer/memory/<project>/prs/<n>.{md,json}` and can optionally be posted as a final PR comment. `code-reviewer` and `explainer` can query this memory, e.g. "past decisions about this module", to feed future reviews. Retention and erasure follow the config, which addresses the open challenge in paper §5.1.7.
 - It can be triggered automatically from CI on merge (§12).
 
+**As built (M6a; ADR 0010).**
+- **Metrics.** `review_metrics` computes the metrics deterministically from the forge's activity (reviews, approvals, comments, commits) and this machine's decision log. Comments drafted with aireviewer are identified by the provenance footer. When the review was not done here, AI-finding outcomes are reported as unknown.
+- **Summary and posting.** `retro-summarizer` submits a stage-`retro` report. `retro_prepare` freezes the final PR comment, which is posted through `proposal_submit`.
+- **Memory.** Memory lives in the user's data directory (`~/.local/share/aireviewer/memory/<host>/<project>/prs/<n>.{json,md}`), not the workspace, because reviews run from anywhere. `memory_save` honours `memory.enabled` and `retention_days` and prunes expired entries. `memory_query` gives the code reviewer and the explainer past decisions as untrusted context. `memory_forget` erases entries.
+
 ### 11.3 Outputs
 - **Terminal:** the panel and diff-map outline (default).
 - **PR sticky comment:** the augmentation summary, with collapsible sections per analyst and the hidden JSON marker.
@@ -537,7 +542,7 @@ runtime:
 
 risk:
   bugfix_keywords: [fix, bug, hotfix, regression]
-  bug_labels: [bug, incident]   # M6: merged PRs/MRs with these labels count as bug fixes
+  bug_labels: [bug, incident]   # merged PRs/MRs with these labels count as bug fixes (M6)
   min_history_commits: 20   # below this → low confidence
 
 reviewers:
@@ -590,7 +595,8 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `issues_search(run_id, queries[])` · `issue_get(run_id, number)` | Issue retrieval for a branch run (§8.2 v1) |
 | `branch_checkout(branch?, base?, remote?)` · `create_context(run_id)` · `create_draft_get/update(run_id, …)` · `create_prepare(run_id)` | `/pr-create` branch runs and the Gate 1 draft (M4; ADR 0007). The ✎ writes below (`git_apply_patch`, `issue_create`, `git_push`, `pr_create`) are not separate tools: `proposal_submit` performs them, in order, for a confirmed `create` proposal |
 | `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
-| `review_metrics(id)` | §11.2 |
+| `review_metrics(run_id)` · ✎ `retro_prepare(run_id)` | §11.2: deterministic metrics; the final comment as a gated proposal |
+| `memory_save(run_id)` · `memory_query(run_id, query?, files?)` · `memory_forget(run_id, number?, all?)` | Local retrospective memory (ADR 0010) |
 | `voice_get(run_id?)` · ✎ `voice_set(description, examples[], use_team_default?)` · ✎ `voice_clear()` | Reviewer voice (ADR 0009); the writes touch only the reviewer's own profile and are never pre-approved |
 | `run_context_get/put(run_id, path, json)` | Read and write `.aireviewer/runs` |
 | ✎ `git_apply_patch(patch, commit_msg)` · ✎ `git_push(branch)` | Gate 1 only |

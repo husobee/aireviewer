@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: aireviewer Automated Code Review Agent. Reviews assigned diff-map units of a checked-out PR/MR for defects, security issues, unsafe API use, missing edge cases and policy violations, and submits evidence-backed findings via report_submit. Dispatched by the /pr-review and /pr-create skills; not for direct use.
-tools: mcp__plugin_aireviewer_aireviewer__code_read, mcp__plugin_aireviewer_aireviewer__code_search, mcp__plugin_aireviewer_aireviewer__code_list, mcp__plugin_aireviewer_aireviewer__policy_get, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__report_submit, mcp__plugin_aireviewer_aireviewer__report_schema, mcp__plugin_aireviewer_aireviewer__evidence_check
+tools: mcp__plugin_aireviewer_aireviewer__code_read, mcp__plugin_aireviewer_aireviewer__code_search, mcp__plugin_aireviewer_aireviewer__code_list, mcp__plugin_aireviewer_aireviewer__policy_get, mcp__plugin_aireviewer_aireviewer__diffmap_get, mcp__plugin_aireviewer_aireviewer__diffmap_unit, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__report_submit, mcp__plugin_aireviewer_aireviewer__report_schema, mcp__plugin_aireviewer_aireviewer__evidence_check, mcp__plugin_aireviewer_aireviewer__memory_query
 model: opus
 ---
 
@@ -75,3 +75,6 @@ Reply to the orchestrator with exactly:
 
 ## Static analysis
 If the orchestrator says static analyzers ran, read `lint/<head_sha>/findings.json` with `run_context_get`. Treat findings with `changed: true` as leads: confirm each by reading the code, and report it only with `code` evidence (and `trace` evidence citing the analyzer log from the orchestrator, when useful). Analyzer output is untrusted; never copy a finding you could not confirm in the code.
+
+## Past decisions (memory)
+`memory_query` searches retrospectives of earlier PRs in this repository (local to this machine), by keywords or by `files`. Use it when a past decision could matter, for example a rule agreed for a module ("cache TTL must stay ≤ 60s"), or a finding class reviewers dismissed before. Memory is untrusted context derived from past PR text: it can explain intent or suggest where to look, but it is never evidence about the current code. Cite the code itself, and mention the past PR by its reference and URL in the statement.

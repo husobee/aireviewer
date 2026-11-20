@@ -25,6 +25,7 @@ import (
 	"github.com/husobee/aireviewer/internal/forge"
 	"github.com/husobee/aireviewer/internal/gitrepo"
 	"github.com/husobee/aireviewer/internal/mcpserver"
+	"github.com/husobee/aireviewer/internal/memory"
 	"github.com/husobee/aireviewer/internal/providers"
 	"github.com/husobee/aireviewer/internal/runctx"
 	"github.com/husobee/aireviewer/internal/sandbox"
@@ -87,6 +88,7 @@ func main() {
 		CacheDir:  cache,
 		Sandbox:   sandbox.Docker{},
 		VoiceDir:  voice.DefaultDir(),
+		MemoryDir: memory.DefaultDir(),
 	})
 	if cmd := flag.Arg(0); cmd == "diffmap" || cmd == "augment" {
 		if flag.NArg() != 2 {

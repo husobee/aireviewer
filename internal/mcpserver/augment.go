@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -149,6 +151,55 @@ type RepoMetricsOut struct {
 	MetricNames      []string                      `json:"metric_names" jsonschema:"names recorded under source repo_metrics that reports may cite"`
 	ConfigWarning    string                        `json:"config_warning,omitempty"`
 	HistoryTruncated bool                          `json:"history_truncated"`
+	BugLabels        string                        `json:"bug_labels,omitempty" jsonschema:"how risk.bug_labels contributed: labelled PRs found, cached or unavailable (keywords only)"`
+}
+
+type labelCache struct {
+	Labels  []string        `json:"labels"`
+	Since   time.Time       `json:"since"`
+	Until   time.Time       `json:"until"`
+	Fetched time.Time       `json:"fetched"`
+	PRs     int             `json:"prs"`
+	Commits map[string]bool `json:"commits"`
+}
+
+// labelledCommits returns the commits of bug-labelled PRs merged in the year
+// before the merge base, cached per repository for a day. Any failure falls
+// back to keywords only, with the reason in the note.
+func (h *handlers) labelledCommits(ctx context.Context, st *checkoutState, labels []string, now time.Time) (map[string]bool, string) {
+	if len(labels) == 0 {
+		return nil, ""
+	}
+	since := now.Add(-365 * 24 * time.Hour)
+	key := sha(strings.Join(labels, "\x00") + "\x00" + since.Format("2006-01-02") + "\x00" + now.Format("2006-01-02"))[:16]
+	path := filepath.Join(h.cfg.CacheDir, "labels", st.Repo.Host, filepath.FromSlash(st.Repo.Project), key+".json")
+	if b, err := os.ReadFile(path); err == nil { //nolint:gosec // path built from the cache dir and a hash
+		var c labelCache
+		if json.Unmarshal(b, &c) == nil && h.now().Sub(c.Fetched) < 24*time.Hour {
+			return c.Commits, fmt.Sprintf("%d PRs labelled %s (cached %s)", c.PRs, strings.Join(labels, "/"), c.Fetched.Format(time.RFC3339))
+		}
+	}
+	p, err := h.cfg.Providers.Get(ctx, st.Repo)
+	if err != nil {
+		return nil, "bug labels unavailable (" + err.Error() + "); keywords only"
+	}
+	bl, ok := p.(forge.BugLabeler)
+	if !ok {
+		return nil, "this forge adapter cannot look up labelled PRs; keywords only"
+	}
+	commits, prs, err := bl.LabelledFixCommits(ctx, st.Repo, labels, since, now, 100)
+	if err != nil {
+		return nil, "bug labels unavailable (" + err.Error() + "); keywords only"
+	}
+	c := labelCache{Labels: labels, Since: since, Until: now, Fetched: h.now(), PRs: prs, Commits: commits}
+	if b, err := json.Marshal(c); err == nil && os.MkdirAll(filepath.Dir(path), 0o750) == nil {
+		_ = os.WriteFile(path, b, 0o600)
+	}
+	note := fmt.Sprintf("%d PRs labelled %s", prs, strings.Join(labels, "/"))
+	if prs >= 100 {
+		note += " (capped at 100)"
+	}
+	return commits, note
 }
 
 func (h *handlers) historyFor(ctx context.Context, st *checkoutState) (time.Time, []history.Commit, int, error) {
@@ -191,7 +242,9 @@ func (h *handlers) repoMetrics(ctx context.Context, _ *mcp.CallToolRequest, in R
 	for _, p := range hp {
 		hist = append(hist, p)
 	}
-	raw := history.Stats(now, commits, hist, history.BugfixRE(cfg.Risk.BugfixKeywords))
+	bugRE := history.BugfixRE(cfg.Risk.BugfixKeywords)
+	labelled, labelNote := h.labelledCommits(ctx, st, cfg.Risk.BugLabels, now)
+	raw := history.Stats(now, commits, hist, bugRE, labelled)
 	stats := map[string]*history.FileStats{}
 	for path, hpath := range hp {
 		s := *raw[hpath]
@@ -201,6 +254,8 @@ func (h *handlers) repoMetrics(ctx context.Context, _ *mcp.CallToolRequest, in R
 	risk := history.Score(stats, changed, len(commits), total, cfg.Risk.MinHistoryCommits)
 
 	kv := map[string]any{"pr_risk": risk.Score, "repo.commits_365d": len(commits), "repo.commits_total": total}
+	kwOnly, lbOnly, both := history.BugSources(commits, bugRE, labelled)
+	kv["repo.bugfix_keyword_only"], kv["repo.bugfix_label_only"], kv["repo.bugfix_both"] = kwOnly, lbOnly, both
 	for _, fr := range risk.Files {
 		kv[fr.Path+".risk"] = fr.Score
 	}
@@ -209,6 +264,8 @@ func (h *handlers) repoMetrics(ctx context.Context, _ *mcp.CallToolRequest, in R
 		kv[p+".commits_90d"] = s.Commits90
 		kv[p+".commits_30d"] = s.Commits30
 		kv[p+".bugfix_365d"] = s.Bugfix365
+		kv[p+".bugfix_keyword_365d"] = s.BugfixKeyword365
+		kv[p+".bugfix_label_365d"] = s.BugfixLabel365
 		kv[p+".authors_365d"] = s.Authors365
 		kv[p+".hotspot_percentile"] = s.HotspotPercentile
 	}
@@ -216,7 +273,7 @@ func (h *handlers) repoMetrics(ctx context.Context, _ *mcp.CallToolRequest, in R
 		return nil, RepoMetricsOut{}, err
 	}
 	out := RepoMetricsOut{Risk: risk, Files: stats, RepoCommits365: len(commits), RepoCommitsTotal: total, AnchoredAt: now,
-		ConfigWarning: warn, HistoryTruncated: len(commits) >= history.MaxCommits}
+		ConfigWarning: warn, HistoryTruncated: len(commits) >= history.MaxCommits, BugLabels: labelNote}
 	for k := range kv {
 		out.MetricNames = append(out.MetricNames, k)
 	}

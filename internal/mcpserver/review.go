@@ -508,14 +508,14 @@ func (h *handlers) findingsList(_ context.Context, _ *mcp.CallToolRequest, in Ru
 
 // ---- reports ----
 
-var stageRE = regexp.MustCompile(`^(creation|review|augmentation)$`)
+var stageRE = regexp.MustCompile(`^(creation|review|augmentation|retro)$`)
 
 func stageOf(s string) (string, error) {
 	if s == "" {
 		return "review", nil
 	}
 	if !stageRE.MatchString(s) {
-		return "", fmt.Errorf("stage must be creation, review or augmentation")
+		return "", fmt.Errorf("stage must be creation, review, augmentation or retro")
 	}
 	return s, nil
 }

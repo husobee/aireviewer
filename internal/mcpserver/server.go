@@ -12,6 +12,7 @@
 //	    create_draft_get/update, create_prepare
 //	M5: runtime_prepare, runtime_run, runtime_results, lint_run, runtime_import (runtime.go)
 //	M5.1: voice_get, voice_set, voice_clear (voice.go)
+//	M6: review_metrics, retro_prepare, memory_save, memory_query, memory_forget (retro.go)
 //
 // Exactly one tool writes outside the run directory: proposal_submit. It
 // posts to the forge (and, for /pr-create, commits the confirmed fixes and
@@ -66,6 +67,8 @@ type Config struct {
 	// VoiceDir holds the reviewer's personal voice profile (M5.1); empty
 	// disables personal voices.
 	VoiceDir string
+	// MemoryDir holds retrospective memory (M6); empty disables memory.
+	MemoryDir string
 }
 
 // New builds the MCP server with all M0 tools registered.
@@ -108,6 +111,7 @@ func New(cfg Config) *mcp.Server {
 	registerCreateTools(s, h)
 	registerRuntimeTools(s, h)
 	registerVoiceTools(s, h)
+	registerRetroTools(s, h)
 	return s
 }
 

@@ -17,6 +17,7 @@ aireviewer reads untrusted content (PR/MR text, comments and code), passes it to
 
 - **Prompt injection that bypasses a human gate**: forge content that causes aireviewer to push, create or post anything without explicit user confirmation, or to change a review verdict. This includes posting content that differs from the confirmed preview, forging an elicitation answer, or editing the decision log undetected (ADR 0006). For `/pr-create`, this also covers committing anything other than the confirmed fixes, pushing a commit other than the previewed one, force-pushing, or creating issues or PRs without confirmation (ADR 0007).
 - **Sandbox escape or secret exposure** in runtime analysis (`runtime_run`, `lint_run`; ADR 0008): host filesystem access, network egress when disabled, privilege gain inside the container, or tokens visible inside it.
+- **Memory poisoning or leakage**: retrospective memory crossing projects, being written outside the user's data directory, or being treated by agents as evidence or instructions rather than untrusted context (ADR 0010).
 - **Voice poisoning**: getting a reviewer voice saved without the reviewer's approval, or a voice that changes what a comment claims or a check verdict (ADR 0009).
 - **Running code without confirmation**: executing a plan the human did not confirm, a plan for a different head, commands taken from the PR head's config, or a forged runtime artifact accepted as trace evidence.
 - **Credential leakage**: tokens written to run artifacts, logs, posted comments, or sent to unintended hosts.
