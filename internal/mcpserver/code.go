@@ -376,6 +376,23 @@ type PlanOut struct {
 	ExceedsThreshold bool       `json:"exceeds_threshold"`
 	ThresholdLines   int        `json:"threshold_lines"`
 	Warning          string     `json:"warning,omitempty"`
+	// RiskOrdered is true when repo_metrics has run, so batches start with
+	// the riskiest code (paper §4.3 feeding §4.5).
+	RiskOrdered bool `json:"risk_ordered"`
+	// Signals are deterministic augmentation signals per reviewable unit
+	// (from repo_metrics and symbol_refs, when they have run): context for
+	// the code reviewers about where to look hardest, not findings.
+	Signals map[string]UnitSignal `json:"signals,omitempty"`
+}
+
+// UnitSignal carries recorded metric values for one unit; cite them as
+// metric evidence with the source and name shown.
+type UnitSignal struct {
+	FileRisk   *int     `json:"file_risk,omitempty" jsonschema:"repo_metrics <file>.risk (0-100)"`
+	Hotspot    *float64 `json:"hotspot_percentile,omitempty" jsonschema:"repo_metrics <file>.hotspot_percentile"`
+	Bugfixes   *int     `json:"bugfix_365d,omitempty" jsonschema:"repo_metrics <file>.bugfix_365d"`
+	RefFiles   *int     `json:"ref_files,omitempty" jsonschema:"symbol_refs <unit>.ref_files: distinct files referencing the unit's symbol"`
+	Confidence string   `json:"risk_confidence,omitempty"`
 }
 
 func (h *handlers) reviewPlan(_ context.Context, _ *mcp.CallToolRequest, in PlanIn) (*mcp.CallToolResult, PlanOut, error) {
@@ -383,10 +400,73 @@ func (h *handlers) reviewPlan(_ context.Context, _ *mcp.CallToolRequest, in Plan
 	if err != nil {
 		return nil, PlanOut{}, err
 	}
-	return nil, planReview(m, in), nil
+	out := planReview(m, in, nil)
+	if order, ok := h.riskOrder(in.RunID, m); ok {
+		out = planReview(m, in, order)
+		out.RiskOrdered = true
+	}
+	out.Signals = h.unitSignals(in.RunID, m, out.Batches)
+	return nil, out, nil
 }
 
-func planReview(m *diffmap.Map, in PlanIn) PlanOut {
+func asInt(v any) (*int, bool) {
+	switch n := v.(type) {
+	case float64:
+		i := int(n)
+		return &i, true
+	case int:
+		return &n, true
+	}
+	return nil, false
+}
+
+func (h *handlers) unitSignals(runID string, m *diffmap.Map, batches [][]string) map[string]UnitSignal {
+	look := h.metricLookup(runID)
+	conf := ""
+	if raw, err := h.cfg.Store.Get(runID, "repo_metrics.json"); err == nil {
+		var rm RepoMetricsOut
+		if json.Unmarshal(raw, &rm) == nil {
+			conf = rm.Risk.Confidence
+		}
+	}
+	out := map[string]UnitSignal{}
+	for _, b := range batches {
+		for _, id := range b {
+			u, ok := m.Unit(id)
+			if !ok {
+				continue
+			}
+			var s UnitSignal
+			if v, ok := look("repo_metrics", u.File+".risk"); ok {
+				s.FileRisk, _ = asInt(v)
+				s.Confidence = conf
+			}
+			if v, ok := look("repo_metrics", u.File+".hotspot_percentile"); ok {
+				if f, ok := v.(float64); ok {
+					s.Hotspot = &f
+				}
+			}
+			if v, ok := look("repo_metrics", u.File+".bugfix_365d"); ok {
+				s.Bugfixes, _ = asInt(v)
+			}
+			if v, ok := look("symbol_refs", id+".ref_files"); ok {
+				s.RefFiles, _ = asInt(v)
+			}
+			if s != (UnitSignal{}) {
+				out[id] = s
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func planReview(m *diffmap.Map, in PlanIn, order []string) PlanOut {
+	if order == nil {
+		order = m.Order
+	}
 	bl, bu, th := in.BatchLines, in.BatchUnits, in.ThresholdLines
 	if bl <= 0 {
 		bl = 1500
@@ -418,7 +498,7 @@ func planReview(m *diffmap.Map, in PlanIn) PlanOut {
 			cur, curLines = nil, 0
 		}
 	}
-	for _, id := range m.Order {
+	for _, id := range order {
 		u, ok := m.Unit(id)
 		if !ok || !inScope(u) {
 			continue

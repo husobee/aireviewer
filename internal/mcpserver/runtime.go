@@ -53,6 +53,11 @@ func registerRuntimeTools(s *mcp.Server, h *handlers) {
 			"linter, message), marked in_diff/changed against the diff-map. Saved to lint/<head>/findings.json; logs are runtime/ artifacts. " +
 			"Findings are leads for the code reviewer, not verdicts."},
 		h.lintRun)
+	mcp.AddTool(s, &mcp.Tool{Name: "runtime_import", Annotations: local,
+		Description: "Copy runtime results, logs and lint findings (with their metrics) from another local run of the same repository at " +
+			"the exact same head, for example from the /pr-create branch run into the new PR run. Refuses when the heads differ: runtime " +
+			"results are never reused across commits."},
+		h.runtimeImport)
 }
 
 const sandboxUser = "65534:65534"
@@ -732,6 +737,78 @@ func (h *handlers) lintRun(ctx context.Context, _ *mcp.CallToolRequest, in Runti
 		return nil, LintOut{}, err
 	}
 	_, _ = h.logEvent(in.RunID, "lint_ran", "server", map[string]any{"id": p.ID, "counts": out.Counts})
+	return nil, out, nil
+}
+
+// ---- runtime_import ----
+
+type RuntimeImportIn struct {
+	RunID     string `json:"run_id" jsonschema:"the run to import into (for example the new PR run after /pr-create)"`
+	FromRunID string `json:"from_run_id" jsonschema:"the run whose runtime and lint results to copy (for example the /pr-create branch run)"`
+}
+
+type RuntimeImportOut struct {
+	Imported []string `json:"imported" jsonschema:"artifacts copied"`
+	HeadSHA  string   `json:"head_sha"`
+	Note     string   `json:"note,omitempty"`
+}
+
+// runtimeImport copies runtime results, logs, lint findings and their
+// metrics between two local runs of the same repository, only when both are
+// at the exact same head (SPEC §5 staleness rule: runtime results are never
+// reused across SHAs).
+func (h *handlers) runtimeImport(_ context.Context, _ *mcp.CallToolRequest, in RuntimeImportIn) (*mcp.CallToolResult, RuntimeImportOut, error) {
+	if in.RunID == in.FromRunID {
+		return nil, RuntimeImportOut{}, errors.New("source and target run are the same")
+	}
+	dst, err := h.loadCheckout(in.RunID)
+	if err != nil {
+		return nil, RuntimeImportOut{}, err
+	}
+	src, err := h.loadCheckout(in.FromRunID)
+	if err != nil {
+		return nil, RuntimeImportOut{}, err
+	}
+	if src.Repo != dst.Repo {
+		return nil, RuntimeImportOut{}, errors.New("the runs belong to different repositories")
+	}
+	if src.HeadSHA != dst.HeadSHA {
+		return nil, RuntimeImportOut{}, fmt.Errorf("stale: results are for %s but this run is at %s (commits were added after testing, for example accepted fixes); run the sandbox again on this head",
+			short(src.HeadSHA), short(dst.HeadSHA))
+	}
+	files, err := h.cfg.Store.List(in.FromRunID)
+	if err != nil {
+		return nil, RuntimeImportOut{}, err
+	}
+	out := RuntimeImportOut{Imported: []string{}, HeadSHA: dst.HeadSHA}
+	for _, f := range files {
+		if !strings.HasPrefix(f, "runtime/"+src.HeadSHA+"/") && !strings.HasPrefix(f, "lint/"+src.HeadSHA+"/") {
+			continue
+		}
+		b, err := h.cfg.Store.Get(in.FromRunID, f)
+		if err != nil {
+			return nil, RuntimeImportOut{}, err
+		}
+		if _, err := h.cfg.Store.Put(in.RunID, f, b); err != nil {
+			return nil, RuntimeImportOut{}, err
+		}
+		out.Imported = append(out.Imported, f)
+	}
+	if len(out.Imported) == 0 {
+		out.Note = "the source run has no runtime or lint results for this head"
+		return nil, out, nil
+	}
+	var mf metricsFile
+	if raw, err := h.cfg.Store.Get(in.FromRunID, "metrics.json"); err == nil && json.Unmarshal(raw, &mf) == nil {
+		for _, source := range []string{"runtime", "lint"} {
+			if kv, ok := mf[source]; ok {
+				if err := h.recordMetrics(in.RunID, source, kv); err != nil {
+					return nil, RuntimeImportOut{}, err
+				}
+			}
+		}
+	}
+	_, _ = h.logEvent(in.RunID, "runtime_imported", "server", map[string]any{"from": in.FromRunID, "head": dst.HeadSHA, "files": len(out.Imported)})
 	return nil, out, nil
 }
 

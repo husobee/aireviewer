@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - On-demand runs ("run X base vs head") through the same confirmation, and `runtime_results`.
 - Agent: `runtime-analyst` (Sonnet). The summary generator, explainer and code reviewer now use runtime and analyzer results.
 - `/pr-review` (`--no-runtime`) and `/pr-create` run the sandbox steps after confirmation.
+- `runtime_import`: `/pr-create` carries the branch run's runtime and lint results into the new PR run when the head is unchanged. If fixes were committed after testing, it refuses as stale and offers a re-run on the final head.
+- Review planning uses augmentation: `repo_metrics` and `symbol_refs` run before `review_plan`, which returns risk-ordered batches (`risk_ordered`) and per-unit `signals` (file risk, hotspot percentile, recent bug fixes, caller counts) passed to each code reviewer.
 - Config: `runtime.setup_network`, `runtime.memory`, `runtime.cpus`, `runtime.env`.
 
 ### Security

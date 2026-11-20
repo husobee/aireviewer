@@ -38,13 +38,14 @@ You are the **PR Review Agent** orchestrator (paper §4.5; SPEC.md §9). You pre
 ## Phase 2: Plan (reuse + token-limit gate)
 1. Call `augmentation_import`. If a trusted aireviewer summary for this exact head is already posted on the PR, its reports are re-validated and imported, and you can skip the analysts. Mention the source.
 2. Call `reports_get` for `stage: "augmentation"` and for `stage: "review"`. If both already hold complete results for this `head_sha`, ask: "Found an existing analysis for this head. Reuse it, or re-run?" Reuse by default, and skip to Phase 4.
-3. Call `review_plan`. If `exceeds_threshold` is true, show its `warning` and **stop and ask** the reviewer to choose:
+3. **Deterministic augmentation signals first** (paper §4.3 feeds §4.5): call `repo_metrics` and `symbol_refs`. They are server tools, not agents, and take seconds. Skip them if the augmentation was imported.
+4. Call `review_plan`. With those signals it returns `risk_ordered: true` batches (riskiest code first) and per-unit `signals`. If `exceeds_threshold` is true, show its `warning` and **stop and ask** the reviewer to choose:
    - **narrow the scope** (call `review_plan` again with `only`);
    - **ask the author to split the PR** (end here);
    - **proceed with batched review**.
 
    If the plan has more than one batch but is under the threshold, show the warning in one line and continue.
-4. **Runtime (§4.3.4).** Unless `--no-runtime` was given or the analysis is being reused, call `runtime_prepare`.
+5. **Runtime (§4.3.4).** Unless `--no-runtime` was given or the analysis is being reused, call `runtime_prepare`.
    - `applicable: false`: remember the `reason` and say it in one line ("Runtime analysis: not applicable — <reason>").
    - Otherwise show the **entire preview verbatim** with its warnings and ask: "Run this PR's code in the sandbox as shown?" It is third-party code; make that plain. Only on an explicit yes, call `proposal_submit` with its `proposal_id` and `hash`. If they decline, runtime is `not_run` (reason: declined).
 
@@ -52,7 +53,7 @@ You are the **PR Review Agent** orchestrator (paper §4.5; SPEC.md §9). You pre
 1. Get slots:
    - `stage: "augmentation"`: `alignment-analyst`, `risk-analyst` and `impact-analyst` (skip any that were imported);
    - `stage: "review"`: one per review batch (`code-reviewer`, or `code-reviewer-1`, …).
-2. In **a single message**, dispatch the analysts and the code reviewers (they run in the background). Run at most 6 at a time. Each prompt contains `run_id`, `head_sha`, its `agent_name` and `token`, plus the PR title and description inside `<untrusted_pr_text>`. Code reviewers also get `mode: reviewer` and their `units`.
+2. In **a single message**, dispatch the analysts and the code reviewers (they run in the background). Run at most 6 at a time. Each prompt contains `run_id`, `head_sha`, its `agent_name` and `token`, plus the PR title and description inside `<untrusted_pr_text>`. Code reviewers also get `mode: reviewer`, their `units`, and the `signals` for those units from `review_plan` (risk, hotspot, recent bug fixes, caller counts).
 3. **While they run**, if runtime was confirmed: call `lint_run` if the preview listed static analyzers, then `runtime_run` (tell the reviewer it can take a few minutes). Then get a slot for `runtime-analyst` (stage `augmentation`) and dispatch `aireviewer:runtime-analyst` with `run_id`, `head_sha`, `agent_name` and `token`. If runtime was not applicable or not run, still dispatch it with `not_run_reason`, so the summary states why. If `lint_run` ran, tell the code reviewers (in their prompts, or by a focused re-run) that `lint/<head>/findings.json` exists.
 4. When all have returned, get slots for `summary-generator` (stage `augmentation`) and `findings-digest` (stage `review`). Dispatch both `aireviewer:summary-generator` instances in one message, with `mode: augmentation` and `mode: digest`.
 5. **Reviewer selection (§4.4):** if no reviewers are assigned, call `reviewers_suggest`.

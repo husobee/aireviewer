@@ -31,6 +31,8 @@ Runtime analysis executes the PR's code: its tests, build scripts and anything t
    - `run_context_put` can no longer write into `runtime/` or any other tool-owned directory, so a note cannot pose as a log.
    - Analyzer findings are normalised: golangci-lint JSON, or the common `file:line[:col]: message` form. They are marked `in_diff` / `changed` against the diff-map and given to the code reviewer as leads to confirm, not as findings.
 
+6. **Reuse only at the same head.** `runtime_import` copies results, logs, lint findings and their metrics between two local runs of the same repository only when both are at the exact same commit; for example from the `/pr-create` branch run into the new PR run when no fixes were committed. Otherwise results are stale and the sandbox must run again (SPEC §5).
+
 ## Consequences
 - Runtime analysis is opt-in per repository (`runtime.enabled`, `runtime.image`) and per run (the confirmation). Without either, or without Docker, the runtime-analyst reports `not_applicable` with the reason, as the spec requires.
 - Docker isolation is not a VM. A container escape through a kernel or runtime vulnerability remains possible; reviewers can decline to run untrusted code, and gVisor or a rootless daemon can be configured underneath Docker.

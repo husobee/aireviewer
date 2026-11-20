@@ -152,6 +152,12 @@ func runtimeRepo(t *testing.T, yml string) (src, head string) {
 
 func runtimeServer(t *testing.T, src, head string, r sandbox.Runner) *mcp.ClientSession {
 	t.Helper()
+	cs, _ := runtimeServerRoot(t, src, head, r)
+	return cs
+}
+
+func runtimeServerRoot(t *testing.T, src, head string, r sandbox.Runner) (*mcp.ClientSession, string) {
+	t.Helper()
 	root := t.TempDir()
 	gp := &gateProvider{prProvider: prProvider{head: head}, author: "mallory", user: "bob"}
 	srv := New(Config{Version: "test", RepoRoot: root, Store: runctx.New(root), CacheDir: t.TempDir(), Providers: gateSource{gp}, Sandbox: r,
@@ -167,7 +173,7 @@ func runtimeServer(t *testing.T, src, head string, r sandbox.Runner) *mcp.Client
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs
+	return cs, root
 }
 
 func newFake() *fakeRunner {
