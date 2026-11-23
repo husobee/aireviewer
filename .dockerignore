@@ -1,0 +1,6 @@
+.git
+.claude
+.aireviewer
+bin
+dist
+*.test

@@ -69,6 +69,10 @@ type Config struct {
 	VoiceDir string
 	// MemoryDir holds retrospective memory (M6); empty disables memory.
 	MemoryDir string
+	// Headless is CI mode (AIREVIEWER_HEADLESS=1): no human is present, so
+	// nothing is posted except the opted-in augmentation summary, and no
+	// code runs, no voice or memory changes (ADR 0011).
+	Headless bool
 }
 
 // New builds the MCP server with all M0 tools registered.

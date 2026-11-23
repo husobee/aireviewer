@@ -89,6 +89,7 @@ func main() {
 		Sandbox:   sandbox.Docker{},
 		VoiceDir:  voice.DefaultDir(),
 		MemoryDir: memory.DefaultDir(),
+		Headless:  os.Getenv("AIREVIEWER_HEADLESS") == "1",
 	})
 	if cmd := flag.Arg(0); cmd == "diffmap" || cmd == "augment" {
 		if flag.NArg() != 2 {

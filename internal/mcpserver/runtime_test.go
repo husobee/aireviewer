@@ -123,6 +123,13 @@ static_analysis: ["vet"]
 
 func runtimeRepo(t *testing.T, yml string) (src, head string) {
 	t.Helper()
+	return runtimeRepoHead(t, yml, strings.Replace(yml, "reruns: 2", "reruns: 2\n  network: true", 1)+"\n")
+}
+
+// runtimeRepoHead builds the fixture with an explicit head .aireviewer.yml,
+// to show that a PR's own config changes are ignored.
+func runtimeRepoHead(t *testing.T, yml, headYML string) (src, head string) {
+	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	src = t.TempDir()
 	gitT(t, src, "init", "-q", "-b", "main")
@@ -137,7 +144,7 @@ func runtimeRepo(t *testing.T, yml string) (src, head string) {
 	gitT(t, src, "checkout", "-q", "-b", "feat")
 	// The PR tries to switch the network on and change the commands: the
 	// merge-base config must win.
-	if err := os.WriteFile(filepath.Join(src, ".aireviewer.yml"), []byte(strings.Replace(yml, "reruns: 2", "reruns: 2\n  network: true", 1)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(src, ".aireviewer.yml"), []byte(headYML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(src, "svc", "svc.go"), []byte(svcHead), 0o644); err != nil {

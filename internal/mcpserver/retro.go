@@ -220,6 +220,9 @@ func (h *handlers) memorySave(ctx context.Context, _ *mcp.CallToolRequest, in Ru
 	if err != nil {
 		return nil, MemorySaveOut{}, err
 	}
+	if h.cfg.Headless {
+		return nil, MemorySaveOut{}, errors.New("headless (CI) mode: memory is local to a reviewer's machine; nothing is saved on the runner")
+	}
 	cfg, _ := h.loadConfig(ctx, st)
 	if !cfg.MemoryEnabled() {
 		return nil, MemorySaveOut{}, errors.New("this repository disables memory (memory.enabled: false)")
@@ -323,6 +326,9 @@ func (h *handlers) memoryForget(_ context.Context, _ *mcp.CallToolRequest, in Me
 	st, err := h.loadCheckout(in.RunID)
 	if err != nil {
 		return nil, MemoryForgetOut{}, err
+	}
+	if h.cfg.Headless {
+		return nil, MemoryForgetOut{}, errors.New("headless (CI) mode: memory is managed on a reviewer's machine")
 	}
 	if in.Number == 0 && !in.All {
 		return nil, MemoryForgetOut{}, errors.New("give a number, or all: true to erase this repository's whole memory")

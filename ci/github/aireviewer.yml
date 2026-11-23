@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: MIT
+#
+# aireviewer headless augmentation for GitHub Actions (SPEC §12, ADR 0011).
+# Copy to .github/workflows/aireviewer.yml and set:
+#   - secret ANTHROPIC_API_KEY
+#   - AIREVIEWER_IMAGE to an image built from ci/Dockerfile
+#   - ci.post_augmentation: true in .aireviewer.yml on the default branch,
+#     if the summary should be posted (otherwise it is only in the job log)
+#   - gate.trusted_bots: ["github-actions[bot]"] so reviewers can import it
+#
+# Uses pull_request (never pull_request_target): the job gets a read-only
+# token on fork PRs and never sees secrets there, and aireviewer runs no PR
+# code in headless mode.
+name: aireviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+
+permissions:
+  contents: read
+  pull-requests: write # the summary is a PR comment
+  issues: write        # PR conversation comments use the issues API
+
+concurrency:
+  group: aireviewer-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  AIREVIEWER_IMAGE: ghcr.io/OWNER/aireviewer-ci:VERSION
+
+jobs:
+  augment:
+    if: >-
+      github.event.action != 'closed' &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: ${{ env.AIREVIEWER_IMAGE }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      # The URL is passed through env, never interpolated into the script.
+      - run: aireviewer-ci review "$PR_URL" "$RUNNER_TEMP/aireviewer"
+      - if: always()
+        uses: actions/upload-artifact@v4 # pin to a commit SHA in production
+        with:
+          name: aireviewer-run-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/aireviewer/.aireviewer/runs
+          retention-days: 7
+
+  retro:
+    if: >-
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: ${{ env.AIREVIEWER_IMAGE }}
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PR_URL: ${{ github.event.pull_request.html_url }}
+    steps:
+      - run: aireviewer-ci retro "$PR_URL" "$RUNNER_TEMP/aireviewer"
+      - if: always()
+        uses: actions/upload-artifact@v4 # pin to a commit SHA in production
+        with:
+          name: aireviewer-retro-${{ github.event.pull_request.number }}
+          path: ${{ runner.temp }}/aireviewer/.aireviewer/runs
+          retention-days: 30

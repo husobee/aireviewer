@@ -72,6 +72,9 @@ type VoiceSetIn struct {
 }
 
 func (h *handlers) voiceSet(_ context.Context, _ *mcp.CallToolRequest, in VoiceSetIn) (*mcp.CallToolResult, VoiceOut, error) {
+	if h.cfg.Headless {
+		return nil, VoiceOut{}, errors.New("headless (CI) mode: a voice is set by a reviewer on their own machine")
+	}
 	if h.cfg.VoiceDir == "" {
 		return nil, VoiceOut{}, errors.New("no user configuration directory is available for a personal voice")
 	}
@@ -86,6 +89,9 @@ func (h *handlers) voiceSet(_ context.Context, _ *mcp.CallToolRequest, in VoiceS
 }
 
 func (h *handlers) voiceClear(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, OKOut, error) {
+	if h.cfg.Headless {
+		return nil, OKOut{}, errors.New("headless (CI) mode: a voice is managed by a reviewer on their own machine")
+	}
 	if err := h.voiceStore().Clear(); err != nil {
 		return nil, OKOut{}, err
 	}

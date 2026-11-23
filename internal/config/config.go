@@ -85,6 +85,10 @@ type Config struct {
 		Enabled       *bool `yaml:"enabled" json:"enabled"`
 		RetentionDays int   `yaml:"retention_days" json:"retention_days" jsonschema:"entries older than this are deleted (default 365; 0 = keep)"`
 	} `yaml:"memory" json:"memory"`
+	// CI configures headless mode (SPEC §12, ADR 0011).
+	CI struct {
+		PostAugmentation bool `yaml:"post_augmentation" json:"post_augmentation" jsonschema:"allow CI to post the augmentation summary without a human (the only automated post)"`
+	} `yaml:"ci" json:"ci"`
 	// Create configures /pr-create commits.
 	Create struct {
 		Signoff bool `yaml:"signoff" json:"signoff" jsonschema:"add a DCO Signed-off-by trailer to the fix commit"`
@@ -203,6 +207,7 @@ func Parse(data []byte) (Config, error) {
 		c.IssueLink.MaxCandidates = min(in.IssueLink.MaxCandidates, 50)
 	}
 	c.Create = in.Create
+	c.CI = in.CI
 	r := in.Runtime
 	c.Runtime.Enabled, c.Runtime.Image, c.Runtime.Setup, c.Runtime.Commands = r.Enabled, r.Image, r.Setup, r.Commands
 	c.Runtime.Network, c.Runtime.SetupNetwork, c.Runtime.Env = r.Network, r.SetupNetwork, r.Env

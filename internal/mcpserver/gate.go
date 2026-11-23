@@ -897,6 +897,20 @@ func (h *handlers) freshPR(ctx context.Context, st *checkoutState) (*forge.PR, f
 	return pr, p, nil
 }
 
+// headlessRefusal explains what CI may and may not do.
+const headlessRefusal = "headless (CI) mode: nothing is posted without a human, except the augmentation summary when the merge-base " +
+	".aireviewer.yml sets ci.post_augmentation: true (ADR 0003)"
+
+// ciFooter replaces the human-confirmation footer on summaries posted from
+// CI, which no human reviewed.
+func ciFooter(cfg config.Config, logHead string) string {
+	if !cfg.Footer() {
+		return ""
+	}
+	return fmt.Sprintf("\n\n---\n<sub>Generated automatically by aireviewer in CI (ci.post_augmentation). Not reviewed by a human; "+
+		"run /pr-review locally to review. Decision log: %s</sub>", logHead[:12])
+}
+
 func footer(cfg config.Config, user, logHead string) string {
 	if !cfg.Footer() {
 		return ""
@@ -1130,7 +1144,11 @@ func (h *handlers) stickyPrepare(ctx context.Context, _ *mcp.CallToolRequest, in
 	_, _ = zw.Write(data)
 	_ = zw.Close()
 	enc := base64.StdEncoding.EncodeToString(gz.Bytes())
-	body := marker + "\n" + strings.TrimSpace(string(panel)) + footer(cfg, user, h.logHead(in.RunID))
+	ft := footer(cfg, user, h.logHead(in.RunID))
+	if h.cfg.Headless {
+		ft = ciFooter(cfg, h.logHead(in.RunID))
+	}
+	body := marker + "\n" + strings.TrimSpace(string(panel)) + ft
 	warnings := []string{}
 	if len(body)+len(enc) < 60000 {
 		body += "\n<!-- aireviewer-data:v1 " + enc + " -->"
@@ -1138,7 +1156,7 @@ func (h *handlers) stickyPrepare(ctx context.Context, _ *mcp.CallToolRequest, in
 		warnings = append(warnings, "reports too large to embed; the comment is human-readable only and cannot be imported elsewhere")
 	}
 	preview := "**Sticky analysis comment** (replaces any previous aireviewer summary on this " + st.Repo.Forge.Noun() + "):\n\n" +
-		strings.TrimSpace(string(panel)) + footer(cfg, user, h.logHead(in.RunID)) + "\n\n_(plus hidden markers with the machine-readable reports)_"
+		strings.TrimSpace(string(panel)) + ft + "\n\n_(plus hidden markers with the machine-readable reports)_"
 	p, err := freeze("sticky", st.HeadSHA, stickyPayload{Marker: markerPrefix, Body: body}, preview, h.now())
 	if err != nil {
 		return nil, ProposalOut{}, err
@@ -1281,7 +1299,23 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		}
 		where = fmt.Sprintf("%s %s", st.Repo.Forge.Abbrev(), pr.Ref)
 	}
-	mech, ok, reason, ask, err := h.confirm(req, &p, where)
+	var (
+		mech, reason string
+		ok           bool
+		ask          *mcp.CallToolResult
+	)
+	if h.cfg.Headless {
+		// No human is present: the only write allowed is the augmentation
+		// summary, and only when the merge-base config opts in (ADR 0003, 0011).
+		cfg, _ := h.loadConfig(ctx, st)
+		if p.Kind != "sticky" || !cfg.CI.PostAugmentation {
+			_, _ = h.logEvent(in.RunID, "headless_refused", "server", map[string]any{"id": p.ID, "kind": p.Kind})
+			return nil, SubmitProposalOut{}, errors.New(headlessRefusal)
+		}
+		mech, ok = "ci_policy", true
+	} else {
+		mech, ok, reason, ask, err = h.confirm(req, &p, where)
+	}
 	if ask != nil {
 		return ask, SubmitProposalOut{}, nil // the client asks the human and retries with the answer
 	}
@@ -1294,8 +1328,11 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		return nil, SubmitProposalOut{Declined: true, Confirmation: mech, Reason: reason, LogHead: head}, nil
 	}
 	actor := "human"
-	if mech == "permission_prompt" {
+	switch mech {
+	case "permission_prompt":
 		actor = "human_via_permission_prompt"
+	case "ci_policy":
+		actor = "ci_policy"
 	}
 	_, _ = h.logEvent(in.RunID, "human_confirmed", actor, map[string]any{"id": p.ID, "hash": p.Hash, "via": mech})
 

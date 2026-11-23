@@ -1,7 +1,7 @@
 ---
 name: pr-retro
 description: Run a retrospective on a merged or closed GitHub pull request or GitLab merge request with the aireviewer framework — deterministic review metrics (time to first review, rounds, iterations, comment origin, what happened to AI findings), a traceable review summary, optional posting as a final PR comment after confirmation, and saving it to local memory so future reviews can learn from past decisions. Use when the user asks for a retro/retrospective of a PR/MR or runs /pr-retro <url>.
-argument-hint: <pr-or-mr-url> [--no-post] [--no-memory]
+argument-hint: <pr-or-mr-url> [--no-post] [--no-memory] [--headless]
 allowed-tools: mcp__plugin_aireviewer_aireviewer__pr_checkout, mcp__plugin_aireviewer_aireviewer__pr_get, mcp__plugin_aireviewer_aireviewer__pr_issues, mcp__plugin_aireviewer_aireviewer__diffmap_build, mcp__plugin_aireviewer_aireviewer__review_metrics, mcp__plugin_aireviewer_aireviewer__report_slot, mcp__plugin_aireviewer_aireviewer__reports_get, mcp__plugin_aireviewer_aireviewer__run_context_get, mcp__plugin_aireviewer_aireviewer__run_context_list, mcp__plugin_aireviewer_aireviewer__decisions_get, mcp__plugin_aireviewer_aireviewer__retro_prepare, mcp__plugin_aireviewer_aireviewer__memory_save, mcp__plugin_aireviewer_aireviewer__memory_query
 ---
 
@@ -19,6 +19,9 @@ You are the **PR Retrospective** orchestrator (paper §4.6; SPEC.md §11.2). You
 3. **Posting is gated.** The final PR comment goes through `retro_prepare`, then the full preview verbatim, then the user's explicit yes, then `proposal_submit`.
 4. **Memory is local** (this machine only) and follows the repository's `memory.enabled` / `memory.retention_days`. Erasing it (`memory_forget`) happens only when the user asks.
 5. **Blameless.** Describe what happened and what to change, not who was at fault.
+
+## Headless mode (`--headless`, CI on merge; ADR 0011)
+Run steps 1–3 only: metrics and the retro-summarizer report. Print the panel and the summary to the job log. Do not post, do not save memory, and do not offer feedback; the server refuses those in CI anyway, and the run directory is kept as a CI artifact.
 
 ## Steps
 1. Parse `$ARGUMENTS`: the URL, `--no-post`, `--no-memory`. Call `pr_checkout` (it works on merged PRs; if this machine reviewed the PR, its earlier run and decision log are reused), then `pr_get`, `diffmap_build` and `pr_issues`.

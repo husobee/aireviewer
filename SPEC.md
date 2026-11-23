@@ -506,6 +506,11 @@ Weights come from config. The tool can switch to "expertise first" when `risk_sc
 - `--headless` means **augmentation only**: post the sticky comment and nothing else. It never posts a verdict or inline comments, because Gate 2 needs a human. A human then runs `/pr-review` locally and reuses the posted augmentation via the marker.
 - On merge, run `/pr-retro --headless`.
 
+**As built (M6b; ADR 0011).**
+- **Enforcement.** The server enforces headless mode (`AIREVIEWER_HEADLESS=1`). `proposal_submit` posts only a `sticky` summary, and only when the merge-base config sets `ci.post_augmentation: true` (logged as `ci_policy`). Everything else is refused: runtime, voice and memory writes, reviews, reviewer requests, and creation.
+- **Provenance.** CI summaries carry a "generated automatically, not reviewed by a human" footer.
+- **CI kit.** `ci/` contains a Docker image (Claude Code, the plugin and a prebuilt server), the `aireviewer-ci` wrapper, a GitHub Actions workflow (`pull_request`, same-repository branches, minimal permissions) and a GitLab CI template (project access token, same-project MRs).
+
 ---
 
 ## 13. Configuration — `.aireviewer.yml` (repo root)

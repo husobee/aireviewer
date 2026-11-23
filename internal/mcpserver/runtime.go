@@ -115,6 +115,9 @@ func (h *handlers) runtimePrepare(ctx context.Context, _ *mcp.CallToolRequest, i
 	na := func(reason string) (*mcp.CallToolResult, RuntimePrepareOut, error) {
 		return nil, RuntimePrepareOut{Reason: reason}, nil
 	}
+	if h.cfg.Headless {
+		return na("headless (CI) mode: running PR code needs a human to confirm the plan (ADR 0008, 0011)")
+	}
 	if cfgErr != "" {
 		return na("the merge-base .aireviewer.yml is invalid: " + cfgErr)
 	}

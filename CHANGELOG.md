@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M6b: headless CI; ADR 0011)
+- Headless mode (`AIREVIEWER_HEADLESS=1`), enforced by the server. `proposal_submit` posts only the augmentation summary, and only when the merge-base config sets `ci.post_augmentation: true`. Runtime, reviews, reviewer requests, creation, and voice and memory writes are refused. CI summaries carry a footer saying no human reviewed them.
+- `/pr-review --headless` (augmentation only) and `/pr-retro --headless` (job-log summary, nothing posted or saved).
+- `ci/`: a Docker image (Claude Code, the plugin and a prebuilt server), the `aireviewer-ci` wrapper, a GitHub Actions workflow and a GitLab CI template, with a setup guide.
+- Tests for the review-activity adapters on both forges.
+
 ### Added (M6a: retrospectives, memory, bug labels; ADR 0010)
 - `/pr-retro <url>`:
   - deterministic `review_metrics` (time to first review, decision latency, review rounds, commits after review started, comments by origin, AI findings posted and disputed, check-flag rates, overrides);
