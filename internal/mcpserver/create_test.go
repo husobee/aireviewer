@@ -118,9 +118,14 @@ func authorWorkspace(t *testing.T) (dir, bare, head string) {
 
 func createServer(t *testing.T, dir, bare string, cp *createProvider) *mcp.ClientSession {
 	t.Helper()
+	return createServerWith(t, dir, bare, createSource{cp})
+}
+
+func createServerWith(t *testing.T, dir, bare string, ps ProviderSource) *mcp.ClientSession {
+	t.Helper()
 	srv := New(Config{
 		Version: "test", RepoRoot: dir, Store: runctx.New(dir), CacheDir: t.TempDir(),
-		Hosts: forge.HostConfigFromEnv(), Providers: createSource{cp},
+		Hosts: forge.HostConfigFromEnv(), Providers: ps,
 		RemoteFor: func(repo forge.Repo, tok string) gitrepo.Remote {
 			return gitrepo.Remote{URL: bare, Kind: repo.Forge, Token: tok}
 		},

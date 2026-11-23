@@ -287,6 +287,11 @@ Steps 2 and 3 run in sequence, because issue linking uses the generated title an
 - **v2.** A local hybrid index (BM25 + embeddings in SQLite/sqlite-vec) is refreshed incrementally by `issues_index_sync`. This gets closer to the paper's RAG and vector-DB design and also works for large backlogs. Re-ranking stays LLM-based in place of the paper's cross-encoder.
 - An explicit `--issue` always wins and skips retrieval, though alignment analysis still runs later.
 
+**As built (M6d; ADR 0013).** v2 is BM25 first:
+- **The index.** `issues_index_sync` keeps a per-repository SQLite FTS5 index (porter stemming; titles weighted 10×, labels 3×, bodies 1×) in the cache directory. It syncs incrementally from an updated-at cursor.
+- **Search.** `issues_search` uses the index when it exists (`source: index`, with `bm25` scores) and the forge search otherwise. Queries become quoted OR-terms, so input cannot inject FTS syntax.
+- **Embeddings** are deferred until a provider is chosen (Anthropic has no embeddings API). The re-ranking stays with the `issue-linker`.
+
 ### 8.3 Gate 1 presentation and commands
 
 ```
@@ -597,7 +602,7 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `runtime_prepare(run_id, commands?)` | Freeze a sandbox plan (merge-base config, or on-demand commands) as a `runtime` proposal; `not_applicable` with the reason otherwise (ADR 0008) |
 | `runtime_run(run_id, proposal_id?)` · `runtime_results(run_id, proposal_id?)` | Execute a **confirmed** plan on base and head with reruns and classification; read the results |
 | `lint_run(run_id, proposal_id?)` | Run the confirmed plan's analyzers on the head; findings normalised and marked against the diff-map |
-| `issues_search(run_id, queries[])` · `issue_get(run_id, number)` | Issue retrieval for a branch run (§8.2 v1) |
+| `issues_search(run_id, queries[])` · `issue_get(run_id, number)` · `issues_index_sync(run_id)` | Issue retrieval for a branch run: the local BM25 index when synced, otherwise forge search (§8.2) |
 | `branch_checkout(branch?, base?, remote?)` · `create_context(run_id)` · `create_draft_get/update(run_id, …)` · `create_prepare(run_id)` | `/pr-create` branch runs and the Gate 1 draft (M4; ADR 0007). The ✎ writes below (`git_apply_patch`, `issue_create`, `git_push`, `pr_create`) are not separate tools: `proposal_submit` performs them, in order, for a confirmed `create` proposal |
 | `reviewers_suggest(run_id)` | §11.1 (deterministic; suggestion only) |
 | `review_metrics(run_id)` · ✎ `retro_prepare(run_id)` | §11.2: deterministic metrics; the final comment as a gated proposal |
@@ -651,7 +656,7 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M4** ✅ (agent prompts not yet evaluated; see ADR 0007) | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion. **Moved to M5:** `lint_run`, because analyzers run in the sandbox | Branch → PR with linked issue and applied fixes, human-approved |
 | **M5** ✅ (agent prompt not yet evaluated; see ADR 0008) | `runtime-analyst` + sandboxed `runtime_run` (base/head, reruns, flakiness), gated by a confirmed `runtime` plan; `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
 | **M5.1** ✅ (see ADR 0009) | Reviewer voice: personal profile plus team default (`comments.voice`), applied to proposed comments, review bodies and check-agent rewrites; never to verdicts or the reviewer's own words | Drafted comments follow the configured voice; checks unchanged |
-| **M6** | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497). **Also (risk, §10):** `risk.bug_labels`. A commit counts as a bug fix when its subject matches `bugfix_keywords` **or** it belongs to a merged PR/MR carrying one of the labels (resolved through the forge API, cached per repository, anchored to the merge base). `repo_metrics` records how many fixes were found by keyword, by label or both, and still works offline from keywords alone when the forge lookup is unavailable | Metrics dashboard data accumulates; CI posts augmentation automatically; label-based bug-fix counts appear in `repo_metrics` |
+| **M6** ✅ (see ADRs 0010–0013; CI templates and end-to-end evaluation not yet run against real services) | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497). **Also (risk, §10):** `risk.bug_labels`. A commit counts as a bug fix when its subject matches `bugfix_keywords` **or** it belongs to a merged PR/MR carrying one of the labels (resolved through the forge API, cached per repository, anchored to the merge base). `repo_metrics` records how many fixes were found by keyword, by label or both, and still works offline from keywords alone when the forge lookup is unavailable | Metrics dashboard data accumulates; CI posts augmentation automatically; label-based bug-fix counts appear in `repo_metrics` |
 
 ---
 

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M6d: issue index v2, BM25; ADR 0013)
+- `issues_index_sync`: a per-repository SQLite FTS5 issue index in the cache directory. Ranking is BM25 with porter stemming, weighting titles above labels above bodies. The first sync is full; later ones fetch only issues updated since the last sync.
+- `issues_search` uses the index when present (`source: index`, `bm25` scores) and falls back to the forge search. Query terms are quoted, so FTS syntax cannot be injected.
+- Forge adapters: incremental issue listing on GitHub (`since`) and GitLab (`updated_after`).
+- `/pr-create` syncs the index before issue linking.
+- Dependency: `modernc.org/sqlite` (pure Go, BSD-3-Clause).
+
 ### Added (M6c: evaluation harness and feedback loop; ADR 0012)
 - `aireviewer-mcp evaluate run|score|bias`:
   - golden-case scoring (precision as a lower bound, recall, F1, false-positive traps, alignment and risk agreement, broken down by category);

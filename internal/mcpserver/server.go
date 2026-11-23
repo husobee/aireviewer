@@ -12,7 +12,8 @@
 //	    create_draft_get/update, create_prepare
 //	M5: runtime_prepare, runtime_run, runtime_results, lint_run, runtime_import (runtime.go)
 //	M5.1: voice_get, voice_set, voice_clear (voice.go)
-//	M6: review_metrics, retro_prepare, memory_save, memory_query, memory_forget (retro.go)
+//	M6: review_metrics, retro_prepare, memory_save, memory_query, memory_forget, feedback_suggest (retro.go),
+//	    issues_index_sync (issueindex.go)
 //
 // Exactly one tool writes outside the run directory: proposal_submit. It
 // posts to the forge (and, for /pr-create, commits the confirmed fixes and
@@ -119,6 +120,7 @@ func New(cfg Config) *mcp.Server {
 	registerRuntimeTools(s, h)
 	registerVoiceTools(s, h)
 	registerRetroTools(s, h)
+	registerIndexTools(s, h)
 	return s
 }
 
@@ -130,6 +132,7 @@ type handlers struct {
 	metricsMu sync.Mutex
 	stateMu   sync.Mutex // drafts, fixes, disputes, mode, proposals
 	logMu     sync.Mutex // decision log
+	indexMu   sync.Mutex // issue index files
 }
 
 // ---- forge_detect ----
