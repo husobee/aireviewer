@@ -1,0 +1,13 @@
+# husobee/aireviewer-sandbox PR #3 (head 828a184): after the /pr-create fix
+# commit, the remaining defect is the janitor goroutine that never stops.
+name: sandbox-ttl
+url: https://github.com/husobee/aireviewer-sandbox/pull/3
+findings:
+  - id: janitor-leak
+    file: store/ttl.go
+    lines: [58, 70]
+    match: "goroutine|leak|stop|close|cancel|forever"
+traps:
+  - file: store/ttl.go
+    lines: [31, 43]
+    why: Get takes the lock and handles expiry correctly at this head

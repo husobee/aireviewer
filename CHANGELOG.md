@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (M6c: evaluation harness and feedback loop; ADR 0012)
+- `aireviewer-mcp evaluate run|score|bias`:
+  - golden-case scoring (precision as a lower bound, recall, F1, false-positive traps, alignment and risk agreement, broken down by category);
+  - end-to-end runs through `claude -p` in eval mode, with tokens, cost and duration per case, a `-max-cost` budget, and `-baseline` regression checks that exit non-zero;
+  - an automation-bias audit listing.
+- Eval mode (`AIREVIEWER_EVAL=1`): the full analysis runs, and the server refuses every write.
+- `/pr-review --eval [--author-mode]`.
+- `feedback_suggest`: configuration suggestions from patterns across saved retrospectives, never applied automatically. Retrospective memory now records disputes by category, dispute reasons and flag rates. `/pr-retro` presents the suggestions.
+- Golden cases from the sandbox repository, plus `evaluation/README.md`.
+
 ### Added (M6b: headless CI; ADR 0011)
 - Headless mode (`AIREVIEWER_HEADLESS=1`), enforced by the server. `proposal_submit` posts only the augmentation summary, and only when the merge-base config sets `ci.post_augmentation: true`. Runtime, reviews, reviewer requests, creation, and voice and memory writes are refused. CI summaries carry a footer saying no human reviewed them.
 - `/pr-review --headless` (augmentation only) and `/pr-retro --headless` (job-log summary, nothing posted or saved).

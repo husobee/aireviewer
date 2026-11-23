@@ -628,6 +628,13 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 - **Regression:** each agent prompt has fixture tests (input → schema-valid output with expected claims), run through `claude -p` in CI.
 - **Automation-bias check:** sample PRs where the reviewer accepted every AI finding unchanged, and audit them by hand.
 
+**As built (M6c; ADR 0012).**
+- **Golden cases** live in `evaluation/golden/*.yaml`.
+- **Running and scoring.** `aireviewer-mcp evaluate run` runs each case end to end with `claude -p` in eval mode (nothing posted, no code run). It scores precision (a lower bound), recall, F1, trap hits, alignment and risk, broken down by category, and records tokens, cost and duration. `evaluate score` re-scores without model calls, and `-baseline` fails on regressions.
+- **Bias audit.** `evaluate bias` lists automation-bias audit candidates.
+- **Feedback.** `feedback_suggest` turns patterns across saved retrospectives into suggested configuration changes, which a human applies.
+- **Regression scope.** Per-agent fixtures are realised as golden cases, since end-to-end evaluation is preferred.
+
 ---
 
 ## 17. Milestones

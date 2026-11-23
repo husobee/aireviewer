@@ -73,6 +73,9 @@ type Config struct {
 	// nothing is posted except the opted-in augmentation summary, and no
 	// code runs, no voice or memory changes (ADR 0011).
 	Headless bool
+	// Eval is evaluation mode (AIREVIEWER_EVAL=1, implies Headless): the full
+	// analysis runs but nothing at all is posted (SPEC §16).
+	Eval bool
 }
 
 // New builds the MCP server with all M0 tools registered.

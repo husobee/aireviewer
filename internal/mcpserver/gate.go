@@ -1308,6 +1308,10 @@ func (h *handlers) proposalSubmit(ctx context.Context, req *mcp.CallToolRequest,
 		// No human is present: the only write allowed is the augmentation
 		// summary, and only when the merge-base config opts in (ADR 0003, 0011).
 		cfg, _ := h.loadConfig(ctx, st)
+		if h.cfg.Eval {
+			_, _ = h.logEvent(in.RunID, "headless_refused", "server", map[string]any{"id": p.ID, "kind": p.Kind, "mode": "eval"})
+			return nil, SubmitProposalOut{}, errors.New("evaluation mode: nothing is posted")
+		}
 		if p.Kind != "sticky" || !cfg.CI.PostAugmentation {
 			_, _ = h.logEvent(in.RunID, "headless_refused", "server", map[string]any{"id": p.ID, "kind": p.Kind})
 			return nil, SubmitProposalOut{}, errors.New(headlessRefusal)

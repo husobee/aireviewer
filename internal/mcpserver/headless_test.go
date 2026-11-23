@@ -93,6 +93,35 @@ func TestHeadlessPostsOnlyOptedInSummary(t *testing.T) {
 	}
 }
 
+func TestEvalModePostsNothing(t *testing.T) {
+	// Even with the CI opt-in, evaluation runs never post.
+	src, head := runtimeRepo(t, runtimeYML+"ci:\n  post_augmentation: true\n")
+	gp := &gateProvider{prProvider: prProvider{head: head}, author: "alice", user: "bot"}
+	root := t.TempDir()
+	srv := New(Config{Version: "test", RepoRoot: root, Store: runctx.New(root), CacheDir: t.TempDir(), Headless: true, Eval: true,
+		Providers: gateSource{gp},
+		RemoteFor: func(repo forge.Repo, tok string) gitrepo.Remote {
+			return gitrepo.Remote{URL: "file://" + src, Kind: repo.Forge, Token: tok}
+		}})
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(context.Background(), st, nil); err != nil {
+		t.Fatal(err)
+	}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "eval"}, nil).Connect(context.Background(), ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cs.Close() }()
+	run := augmentRun(t, cs, head)
+	pp := call[ProposalOut](t, cs, "sticky_prepare", map[string]any{"run_id": run})
+	if msg := callErr(t, cs, "proposal_submit", map[string]any{"run_id": run, "proposal_id": pp.ProposalID, "hash": pp.Hash}); !strings.Contains(msg, "evaluation mode") {
+		t.Errorf("eval posted: %s", msg)
+	}
+	if gp.marker != nil {
+		t.Fatal("comment reached the forge in evaluation mode")
+	}
+}
+
 func TestHeadlessWithoutOptInPostsNothing(t *testing.T) {
 	// The PR itself opts in; only the merge-base config counts, so CI
 	// still posts nothing.

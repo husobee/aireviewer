@@ -1,0 +1,16 @@
+# husobee/aireviewer-sandbox PR #4 (head add11d3), after it was fixed: a
+# clean change. Every finding counts against precision; the traps mark code
+# that was a defect earlier and is correct now.
+name: sandbox-keys-clean
+url: https://github.com/husobee/aireviewer-sandbox/pull/4
+findings: []
+traps:
+  - file: store/keys.go
+    lines: [17, 25]
+    why: Snapshot now has a pointer receiver and takes the read lock
+  - file: store/keys.go
+    lines: [30, 37]
+    why: pickShard is deterministic (FNV-32a)
+  - file: store/store.go
+    lines: [22, 30]
+    why: Get returns ErrNotFound again

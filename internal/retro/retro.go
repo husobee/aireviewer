@@ -17,17 +17,20 @@ import (
 
 // Local summarises the reviewer's local aireviewer trail (decision log).
 type Local struct {
-	HasData          bool                      `json:"has_data" jsonschema:"false when this PR was not reviewed with aireviewer on this machine"`
-	FindingsTotal    int                       `json:"findings_total" jsonschema:"code-review findings across reviewed heads"`
-	FindingsDrafted  int                       `json:"findings_drafted" jsonschema:"findings turned into a draft comment"`
-	FindingsPosted   int                       `json:"findings_posted" jsonschema:"findings whose comment was posted in a review"`
-	FindingsDisputed int                       `json:"findings_disputed" jsonschema:"findings the reviewer disputed (dismissed)"`
-	DisputeReasons   []string                  `json:"dispute_reasons,omitempty"`
-	CommentsPosted   int                       `json:"comments_posted"`
-	Checks           map[string]map[string]int `json:"checks" jsonschema:"check -> verdict -> count (toxicity, usefulness)"`
-	Overrides        int                       `json:"overrides" jsonschema:"gate holds the reviewer overrode with a reason"`
-	Declines         int                       `json:"declines"`
-	Posts            map[string]int            `json:"posts" jsonschema:"posted proposals by kind"`
+	HasData          bool     `json:"has_data" jsonschema:"false when this PR was not reviewed with aireviewer on this machine"`
+	FindingsTotal    int      `json:"findings_total" jsonschema:"code-review findings across reviewed heads"`
+	FindingsDrafted  int      `json:"findings_drafted" jsonschema:"findings turned into a draft comment"`
+	FindingsPosted   int      `json:"findings_posted" jsonschema:"findings whose comment was posted in a review"`
+	FindingsDisputed int      `json:"findings_disputed" jsonschema:"findings the reviewer disputed (dismissed)"`
+	DisputeReasons   []string `json:"dispute_reasons,omitempty"`
+	DisputedFindings []string `json:"disputed_findings,omitempty"`
+	// DisputedByCategory is filled by the caller from the stored reports.
+	DisputedByCategory map[string]int            `json:"disputed_by_category,omitempty"`
+	CommentsPosted     int                       `json:"comments_posted"`
+	Checks             map[string]map[string]int `json:"checks" jsonschema:"check -> verdict -> count (toxicity, usefulness)"`
+	Overrides          int                       `json:"overrides" jsonschema:"gate holds the reviewer overrode with a reason"`
+	Declines           int                       `json:"declines"`
+	Posts              map[string]int            `json:"posts" jsonschema:"posted proposals by kind"`
 }
 
 // FromLog derives Local from decision-log entries. findingsTotal comes from
@@ -91,6 +94,10 @@ func FromLog(entries []decisionlog.Entry, findingsTotal int) Local {
 	l.FindingsDrafted = len(findings)
 	l.FindingsPosted = len(postedFinding)
 	l.FindingsDisputed = len(disputed)
+	for f := range disputed {
+		l.DisputedFindings = append(l.DisputedFindings, f)
+	}
+	sort.Strings(l.DisputedFindings)
 	return l
 }
 

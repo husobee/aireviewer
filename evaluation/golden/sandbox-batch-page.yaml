@@ -1,0 +1,27 @@
+# Seeded defects in husobee/aireviewer-sandbox PR #1 (head 778bbac).
+name: sandbox-batch-page
+url: https://github.com/husobee/aireviewer-sandbox/pull/1
+findings:
+  - id: putbatch-unlocked
+    file: store/store.go
+    lines: [40, 43]
+    category: defect
+    match: "lock|race|concurren|mutex"
+    severity_min: major
+  - id: page-end-out-of-range
+    file: store/store.go
+    lines: [48, 52]
+    category: defect
+    match: "range|bound|panic|len|slice"
+    severity_min: major
+  - id: delete-under-read-lock
+    file: store/store.go
+    lines: [56, 60]
+    category: defect
+    match: "rlock|read lock|write lock|race|lock"
+    severity_min: major
+traps:
+  - file: store/store.go
+    lines: [21, 37]
+    why: Get and Put are unchanged and correct
+notes: The Page offset is also unchecked (offset > len panics); a finding about it matches page-end-out-of-range.

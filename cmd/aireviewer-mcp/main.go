@@ -61,6 +61,11 @@ func main() {
 	case "version":
 		fmt.Println(version)
 		return
+	case "evaluate":
+		if err := evaluate(ctx, hosts, *root, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
 	case "inspect":
 		if flag.NArg() != 2 {
 			log.Fatal("usage: aireviewer-mcp inspect <pr-or-mr-url>")
@@ -89,7 +94,8 @@ func main() {
 		Sandbox:   sandbox.Docker{},
 		VoiceDir:  voice.DefaultDir(),
 		MemoryDir: memory.DefaultDir(),
-		Headless:  os.Getenv("AIREVIEWER_HEADLESS") == "1",
+		Headless:  os.Getenv("AIREVIEWER_HEADLESS") == "1" || os.Getenv("AIREVIEWER_EVAL") == "1",
+		Eval:      os.Getenv("AIREVIEWER_EVAL") == "1",
 	})
 	if cmd := flag.Arg(0); cmd == "diffmap" || cmd == "augment" {
 		if flag.NArg() != 2 {
