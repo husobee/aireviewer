@@ -14,6 +14,7 @@
 //	M5.1: voice_get, voice_set, voice_clear (voice.go)
 //	M6: review_metrics, retro_prepare, memory_save, memory_query, memory_forget, feedback_suggest (retro.go),
 //	    issues_index_sync (issueindex.go)
+//	§21: changeset_open, changeset_get, changeset_discover, changeset_map, changeset_order (changeset.go)
 //
 // Exactly one tool writes outside the run directory: proposal_submit. It
 // posts to the forge (and, for /pr-create, commits the confirmed fixes and
@@ -121,6 +122,7 @@ func New(cfg Config) *mcp.Server {
 	registerVoiceTools(s, h)
 	registerRetroTools(s, h)
 	registerIndexTools(s, h)
+	registerChangesetTools(s, h)
 	return s
 }
 
@@ -357,7 +359,7 @@ func writableNote(rel string) bool {
 	}
 	// Directories written only by tools: a note there could pose as a runtime
 	// log (trace evidence), a report, a proposal or gate state.
-	for _, d := range []string{"runtime/", "sandbox/", "lint/", "review/", "augmentation/", "create/", "proposals/"} {
+	for _, d := range []string{"runtime/", "sandbox/", "lint/", "review/", "augmentation/", "create/", "proposals/", "retro/", "changeset/", "changeset-data/"} {
 		if strings.HasPrefix(clean, d) {
 			return false
 		}

@@ -54,6 +54,7 @@ type Evidence struct {
 	Source   string `json:"source,omitempty"`
 	Artifact string `json:"artifact,omitempty"`
 	Ref      string `json:"ref,omitempty"`
+	Member   string `json:"member,omitempty"`
 	Quote    string `json:"quote,omitempty"`
 }
 
@@ -119,6 +120,13 @@ type Env struct {
 	// UpstreamClaims is the set of claim ids that synthesising agents may
 	// cite in "sources".
 	UpstreamClaims map[string]bool
+	// MemberLineCount is set for change-set reports (SPEC §21): code
+	// evidence must then name its member run, and is checked against that
+	// member's head or merge base.
+	MemberLineCount func(member, side, path string) (int, error)
+	// AnchorOK, when set, validates anchors instead of Map (change-set
+	// reports use repo-qualified unit ids).
+	AnchorOK func(anchor string) bool
 }
 
 // ErrInvalid wraps schema-level failures (nothing is accepted).
@@ -165,10 +173,16 @@ func Validate(raw []byte, env Env) (*Result, error) {
 			res.Dropped = append(res.Dropped, Dropped{ClaimID: c.ID, Reasons: reasons})
 			continue
 		}
-		if env.Map != nil {
+		if env.Map != nil || env.AnchorOK != nil {
 			anchors := c.Anchors[:0:0]
 			for _, a := range c.Anchors {
-				if _, ok := env.Map.Unit(a); ok {
+				ok := false
+				if env.AnchorOK != nil {
+					ok = env.AnchorOK(a)
+				} else {
+					_, ok = env.Map.Unit(a)
+				}
+				if ok {
 					anchors = append(anchors, a)
 				} else {
 					res.Notes = append(res.Notes, fmt.Sprintf("claim %s: removed unknown anchor %q", c.ID, a))
@@ -233,10 +247,27 @@ func checkEvidence(e Evidence, env Env) string {
 		if len(e.Lines) != 2 || e.Lines[0] < 1 || e.Lines[1] < e.Lines[0] {
 			return fmt.Sprintf("invalid line range %v (need [start,end], 1-based, start<=end)", e.Lines)
 		}
-		if env.LineCount == nil {
+		var n int
+		var err error
+		switch {
+		case env.MemberLineCount != nil:
+			if e.Member == "" {
+				return "code evidence in a change-set report must name its member run (member)"
+			}
+			n, err = env.MemberLineCount(e.Member, side, e.File)
+			if err != nil {
+				return fmt.Sprintf("file %q does not exist on the %s side of member %s (%v)", e.File, side, e.Member, err)
+			}
+			if e.Lines[1] > n {
+				return fmt.Sprintf("lines %v exceed %q length (%d lines on the %s side of member %s)", e.Lines, e.File, n, side, e.Member)
+			}
+			return ""
+		case e.Member != "":
+			return "member is only allowed in change-set reports"
+		case env.LineCount == nil:
 			return ""
 		}
-		n, err := env.LineCount(side, e.File)
+		n, err = env.LineCount(side, e.File)
 		if err != nil {
 			return fmt.Sprintf("file %q does not exist on the %s side", e.File, side)
 		}

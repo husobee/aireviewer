@@ -879,6 +879,9 @@ func (h *handlers) freshPR(ctx context.Context, st *checkoutState) (*forge.PR, f
 	if st.isBranch() {
 		return nil, nil, errors.New("this is a /pr-create branch run: no " + st.Repo.Forge.Abbrev() + " exists yet")
 	}
+	if st.Mode == "changeset" {
+		return nil, nil, errors.New("this is a change-set run: comments and reviews are posted per member PR, on the member's run")
+	}
 	p, err := h.cfg.Providers.Get(ctx, st.Repo)
 	if err != nil {
 		return nil, nil, err

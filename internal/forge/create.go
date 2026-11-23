@@ -23,6 +23,12 @@ type BranchPRFinder interface {
 	FindOpenPR(ctx context.Context, repo Repo, branch string) (*PR, error)
 }
 
+// BaseBranchLister lists open PRs that target a branch (stack discovery for
+// change sets, SPEC §21).
+type BaseBranchLister interface {
+	ListOpenPRsByBase(ctx context.Context, repo Repo, base string) ([]*PR, error)
+}
+
 // IssueSearch is one retrieval query (SPEC §8.2 v1).
 type IssueSearch struct {
 	Query string

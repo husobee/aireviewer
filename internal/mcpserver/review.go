@@ -508,14 +508,14 @@ func (h *handlers) findingsList(_ context.Context, _ *mcp.CallToolRequest, in Ru
 
 // ---- reports ----
 
-var stageRE = regexp.MustCompile(`^(creation|review|augmentation|retro)$`)
+var stageRE = regexp.MustCompile(`^(creation|review|augmentation|retro|changeset)$`)
 
 func stageOf(s string) (string, error) {
 	if s == "" {
 		return "review", nil
 	}
 	if !stageRE.MatchString(s) {
-		return "", fmt.Errorf("stage must be creation, review, augmentation or retro")
+		return "", fmt.Errorf("stage must be creation, review, augmentation, retro or changeset")
 	}
 	return s, nil
 }
@@ -630,16 +630,25 @@ func (h *handlers) reportSubmit(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if err != nil {
 		return nil, SubmitOut{}, err
 	}
-	m, err := h.loadMap(in.RunID)
-	if err != nil {
-		return nil, SubmitOut{}, err
-	}
 	var peek struct {
 		Agent string `json:"agent"`
 	}
 	_ = json.Unmarshal([]byte(in.Report), &peek)
 	agent := strings.Trim(agentRE.ReplaceAllString(strings.ToLower(peek.Agent), "-"), "-.")
-	res, err := schema.Validate([]byte(in.Report), h.env(ctx, in.RunID, st, m, stage, peek.Agent))
+	var env schema.Env
+	if st.Mode == "changeset" {
+		// A set-level report cites code in member runs (SPEC §21).
+		if env, err = h.changesetEnv(ctx, in.RunID, st, stage, peek.Agent); err != nil {
+			return nil, SubmitOut{}, err
+		}
+	} else {
+		m, err := h.loadMap(in.RunID)
+		if err != nil {
+			return nil, SubmitOut{}, err
+		}
+		env = h.env(ctx, in.RunID, st, m, stage, peek.Agent)
+	}
+	res, err := schema.Validate([]byte(in.Report), env)
 	if errors.Is(err, schema.ErrInvalid) {
 		// Returned as a normal result so the agent can read it and retry.
 		return nil, SubmitOut{Accepted: false, Rejection: err.Error(), Dropped: []schema.Dropped{}, Notes: []string{}}, nil

@@ -608,6 +608,7 @@ All tools return JSON. Tools marked ✎ have side effects. Skills allow-list the
 | `review_metrics(run_id)` · ✎ `retro_prepare(run_id)` | §11.2: deterministic metrics; the final comment as a gated proposal |
 | `memory_save(run_id)` · `memory_query(run_id, query?, files?)` · `memory_forget(run_id, number?, all?)` | Local retrospective memory (ADR 0010) |
 | `voice_get(run_id?)` · ✎ `voice_set(description, examples[], use_team_default?)` · ✎ `voice_clear()` | Reviewer voice (ADR 0009); the writes touch only the reviewer's own profile and are never pre-approved |
+| `changeset_open(urls[])` · `changeset_get` · `changeset_discover(run_id)` · `changeset_map` · `changeset_order` | §21 change sets (ADR 0014): cross-PR edges, merge order and compatibility; set-level reports cite member code with `member` |
 | `run_context_get/put(run_id, path, json)` | Read and write `.aireviewer/runs` |
 | ✎ `git_apply_patch(patch, commit_msg)` · ✎ `git_push(branch)` | Gate 1 only |
 | ✎ `issue_create(title, body, labels)` · ✎ `pr_create(spec)` · ✎ `pr_update(id, spec)` | Gate 1 only |
@@ -656,6 +657,7 @@ The review path comes first: it can be tested on any PR link immediately and nee
 | **M4** ✅ (agent prompts not yet evaluated; see ADR 0007) | `/pr-create` end to end: detail gen, issue linking v1, author-mode review, patches, Gate 1, `pr_create`, reviewer suggestion. **Moved to M5:** `lint_run`, because analyzers run in the sandbox | Branch → PR with linked issue and applied fixes, human-approved |
 | **M5** ✅ (agent prompt not yet evaluated; see ADR 0008) | `runtime-analyst` + sandboxed `runtime_run` (base/head, reruns, flakiness), gated by a confirmed `runtime` plan; `lint_run` (configured static analyzers as evidence, §8 step 4) | Deterministic vs flaky classification on a seeded flaky test |
 | **M5.1** ✅ (see ADR 0009) | Reviewer voice: personal profile plus team default (`comments.voice`), applied to proposed comments, review bodies and check-agent rewrites; never to verdicts or the reviewer's own words | Drafted comments follow the configured voice; checks unchanged |
+| **M7a** ✅ (see ADR 0014) | §21 slice 1: change-set review across PRs, repositories and forges (declared sets, discovery suggestions, cross-PR map, merge order and compatibility, set-level analyst) | A two-repository set reports the required merge order and an incompatible removal |
 | **M6** ✅ (see ADRs 0010–0013; CI templates and end-to-end evaluation not yet run against real services) | `/pr-retro`, memory, metrics; headless CI for GH Actions and GitLab CI; issue index v2. **Also:** the evaluation harness (§16) with end-to-end evaluation rather than isolated per-agent checks (l.1628), stratified by comment type (§5.3.1), with token and cost tracking per run (§5.1.10); and a human-approved feedback loop from retrospectives into agent configuration (l.1491-1497). **Also (risk, §10):** `risk.bug_labels`. A commit counts as a bug fix when its subject matches `bugfix_keywords` **or** it belongs to a merged PR/MR carrying one of the labels (resolved through the forge API, cached per repository, anchored to the merge base). `repo_metrics` records how many fixes were found by keyword, by label or both, and still works offline from keywords alone when the forge lookup is unavailable | Metrics dashboard data accumulates; CI posts augmentation automatically; label-based bug-fix counts appear in `repo_metrics` |
 
 ---
@@ -784,6 +786,18 @@ aireviewer/
 - **Creation side**: `/pr-create` across several local branches or repos produces linked PRs with cross-references and a declared merge order.
 
 **Open questions:** discovery precision versus explicit declaration; auth across multiple hosts; size and cost limits for large sets; how a partially merged set is represented.
+
+**As built (slice 1: review; ADR 0014).** The open questions are resolved as follows.
+- **Discovery versus declaration.** Sets are declared (`/pr-review <url> <url> …`, 2–8 members). `changeset_discover` only suggests stacked and referenced PRs.
+- **Auth across hosts.** Each host uses its own token through the provider registry.
+- **Partially merged sets.** Merged members are read-only context and come first in the merge order.
+- **Tools and model.**
+  - `changeset_open` checks out every member as a normal PR run; the change-set run's staleness key covers every member's head.
+  - `changeset_map` builds cross-PR symbol edges (added, modified or removed symbols and their uses at each consumer's head and merge base), with repo-qualified unit ids.
+  - `changeset_order` derives stacked, introduces and removal constraints, contracts to review, a merge sequence, and the problems no order fixes (incompatible, cycle, merged out of order).
+  - `changeset-analyst` writes a set-level report whose code evidence names its member run.
+- **Gates.** Comments and verdicts stay per member and gated.
+- **Not yet:** creating linked PRs across branches or repositories, building the set together in the sandbox, and a combined diff-map object.
 
 ---
 

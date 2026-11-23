@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added (§21 slice 1: change sets; ADR 0014)
+- `/pr-review <url> <url> …`: review 2–8 PRs (any mix of repositories and forges) as one change.
+  - **Set panel:** merge order, blocking problems, contracts, union alignment, and per-PR notes.
+  - **Per member:** each member gets its usual per-PR review.
+- Tools:
+  - `changeset_open`;
+  - `changeset_get` (staleness over every member's head);
+  - `changeset_discover` (suggestions: stacked and referenced PRs);
+  - `changeset_map` (cross-PR symbol edges with repo-qualified unit ids);
+  - `changeset_order` (stacked, introduces and removal constraints; contracts; a merge sequence; incompatible, cycle and merged-out-of-order problems).
+- `changeset-analyst` agent (Opus) and the `changeset` report stage. In a change-set report, code evidence names its member run (`member`), and anchors are repo-qualified.
+- Forge adapters: open PRs by target branch, for stack discovery.
+
+### Security
+- `run_context_put` also refuses `retro/`, `changeset/` and `changeset-data/`.
+
 ### Added (M6d: issue index v2, BM25; ADR 0013)
 - `issues_index_sync`: a per-repository SQLite FTS5 issue index in the cache directory. Ranking is BM25 with porter stemming, weighting titles above labels above bodies. The first sync is full; later ones fetch only issues updated since the last sync.
 - `issues_search` uses the index when present (`source: index`, `bm25` scores) and falls back to the forge search. Query terms are quoted, so FTS syntax cannot be injected.
