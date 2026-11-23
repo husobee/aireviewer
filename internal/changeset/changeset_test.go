@@ -58,6 +58,15 @@ func TestAnalyzeOrderAndProblems(t *testing.T) {
 		t.Errorf("constraints = %+v", o.Constraints)
 	}
 
+	// Several symbols between the same pair make one constraint naming all.
+	o = Analyze(ms[:2], []Edge{
+		{From: "api", To: "client", Symbol: "Lookup", Change: "added", UsedAtHead: true},
+		{From: "api", To: "client", Symbol: "Copy", Change: "added", UsedAtHead: true},
+	})
+	if len(o.Constraints) != 1 || !strings.Contains(o.Constraints[0].Reason, "uses Lookup, Copy, which o/api#1 introduces") {
+		t.Errorf("merged constraint = %+v", o.Constraints)
+	}
+
 	// Removal both ways makes a cycle; a consumer still using a removed
 	// symbol is incompatible regardless of order.
 	o = Analyze(ms[:2], []Edge{

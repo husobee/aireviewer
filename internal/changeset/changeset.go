@@ -165,20 +165,32 @@ func Analyze(members []Member, edges []Edge) Order {
 			o.Merged = append(o.Merged, m.RunID)
 		}
 	}
-	seen := map[string]bool{}
-	add := func(c Constraint) {
+	seen := map[string]int{} // constraint key -> index
+	syms := map[string][]string{}
+	add := func(c Constraint, symbol string) {
 		k := c.Before + ">" + c.After + ">" + c.Kind
-		if c.Before == c.After || seen[k] {
+		if c.Before == c.After {
 			return
 		}
-		seen[k] = true
+		if i, ok := seen[k]; ok {
+			// Same pair and kind: one constraint naming every symbol.
+			if symbol != "" {
+				syms[k] = append(syms[k], symbol)
+				o.Constraints[i].Reason = strings.Replace(c.Reason, symbol, strings.Join(syms[k], ", "), 1)
+			}
+			return
+		}
+		seen[k] = len(o.Constraints)
+		if symbol != "" {
+			syms[k] = []string{symbol}
+		}
 		o.Constraints = append(o.Constraints, c)
 	}
 	for _, a := range members {
 		for _, b := range members {
 			if a.RunID != b.RunID && a.Repo == b.Repo && b.BaseBranch != "" && b.BaseBranch == a.HeadBranch {
 				add(Constraint{Before: a.RunID, After: b.RunID, Kind: "stacked",
-					Reason: fmt.Sprintf("%s targets %s's branch %q", b.Ref, a.Ref, a.HeadBranch)})
+					Reason: fmt.Sprintf("%s targets %s's branch %q", b.Ref, a.Ref, a.HeadBranch)}, "")
 			}
 		}
 	}
@@ -187,7 +199,7 @@ func Analyze(members []Member, edges []Edge) Order {
 		case "added":
 			if e.UsedAtHead && !e.UsedAtBase {
 				add(Constraint{Before: e.From, After: e.To, Kind: "introduces",
-					Reason: fmt.Sprintf("%s uses %s, which %s introduces", ref(byID, e.To), e.Symbol, ref(byID, e.From))})
+					Reason: fmt.Sprintf("%s uses %s, which %s introduces", ref(byID, e.To), e.Symbol, ref(byID, e.From))}, e.Symbol)
 			}
 		case "deleted":
 			if e.UsedAtHead {
@@ -195,7 +207,7 @@ func Analyze(members []Member, edges []Edge) Order {
 					Detail: fmt.Sprintf("%s still uses %s, which %s removes: it breaks once %s merges", ref(byID, e.To), e.Symbol, ref(byID, e.From), ref(byID, e.From))})
 			} else if e.UsedAtBase {
 				add(Constraint{Before: e.To, After: e.From, Kind: "removal",
-					Reason: fmt.Sprintf("%s stops using %s, which %s removes", ref(byID, e.To), e.Symbol, ref(byID, e.From))})
+					Reason: fmt.Sprintf("%s stops using %s, which %s removes", ref(byID, e.To), e.Symbol, ref(byID, e.From))}, e.Symbol)
 			}
 		case "modified":
 			if e.UsedAtHead || e.UsedAtBase {
