@@ -2,8 +2,7 @@
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Report vulnerabilities privately through the hosting platform's private vulnerability reporting feature (GitHub: *Security → Report a vulnerability*).
-<!-- TODO(maintainers): add a fallback security contact before the repository goes public. -->
+**Do not open a public issue.** Report vulnerabilities privately through GitHub's private vulnerability reporting: [Security → Report a vulnerability](https://github.com/husobee/aireviewer/security/advisories/new).
 
 We aim to acknowledge reports within 3 business days and to agree on a disclosure timeline with you.
 

@@ -1,3 +1,5 @@
+# Example case: it points at the maintainers' private sandbox repository, so it
+# will not run for others. Replace the URL and findings with PRs you can access.
 # husobee/aireviewer-sandbox PR #4 (head add11d3), after it was fixed: a
 # clean change. Every finding counts against precision; the traps mark code
 # that was a defect earlier and is correct now.

@@ -5,6 +5,8 @@ type: software
 authors:
   - name: "The aireviewer contributors"
 license: MIT
+repository-code: "https://github.com/husobee/aireviewer"
+url: "https://github.com/husobee/aireviewer"
 version: 0.1.0-dev
 references:
   - type: article

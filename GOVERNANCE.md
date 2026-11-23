@@ -9,7 +9,7 @@
 
 | Name | Areas |
 |---|---|
-| _TBD before public launch_ | all |
+| [@husobee](https://github.com/husobee) | all |
 
 ## Decisions
 

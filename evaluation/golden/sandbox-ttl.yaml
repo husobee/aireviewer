@@ -1,3 +1,5 @@
+# Example case: it points at the maintainers' private sandbox repository, so it
+# will not run for others. Replace the URL and findings with PRs you can access.
 # husobee/aireviewer-sandbox PR #3 (head 828a184): after the /pr-create fix
 # commit, the remaining defect is the janitor goroutine that never stops.
 name: sandbox-ttl

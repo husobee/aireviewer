@@ -662,6 +662,18 @@ The review path comes first: it can be tested on any PR link immediately and nee
 
 ---
 
+### 17.1 Future additions
+Planned after the first public release, in no fixed order:
+- **§21 change sets, later slices:**
+  - `/pr-create` across several branches or repositories with a declared merge order;
+  - building and testing a set together in the sandbox;
+  - a combined diff-map object.
+- **§22 Jira** (and other external trackers) for alignment and issue linking.
+- **Issue index embeddings**, merged with BM25 once a provider is chosen (ADR 0013).
+- **Validation at scale:** a public golden set and evaluation baselines (ADR 0012), and the CI templates exercised on real pipelines (ADR 0011).
+
+---
+
 ## 18. Deliberate deviations from the paper
 
 | Paper | This system | Why |
@@ -685,13 +697,13 @@ The review path comes first: it can be tested on any PR link immediately and nee
 
 ## 19. Open decisions
 
-1. ~~MCP language~~ **Resolved:** Go (ADR 0002). Module path `github.com/husobee/aireviewer`, a placeholder until the public repo exists.
+1. ~~MCP language~~ **Resolved:** Go (ADR 0002). Module path `github.com/husobee/aireviewer`.
 2. ~~Forge priority~~ **Resolved:** both forges from M0. Still open: the minimum self-managed GitLab version, which matters for the "request changes" state.
 3. ~~Post augmentation by default~~ **Resolved:** never without confirmation (§4 rule 6, ADR 0003).
 4. ~~Runtime sandbox~~ **Resolved:** Docker is available.
 5. ~~Plugin distribution~~ **Resolved:** a public open-source project under the MIT license (§20).
 6. **Copyright line:** `LICENSE` currently reads "The aireviewer contributors". Swap in a personal or company name if you prefer.
-7. **Code host for the project itself:** GitHub (recommended for plugin-marketplace discovery and Actions) or GitLab, with a mirror to the other.
+7. ~~Code host for the project itself~~ **Resolved:** GitHub, at [husobee/aireviewer](https://github.com/husobee/aireviewer) (public). A GitLab mirror is optional.
 
 ---
 

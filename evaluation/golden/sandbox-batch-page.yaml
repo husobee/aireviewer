@@ -1,3 +1,5 @@
+# Example case: it points at the maintainers' private sandbox repository, so it
+# will not run for others. Replace the URL and findings with PRs you can access.
 # Seeded defects in husobee/aireviewer-sandbox PR #1 (head 778bbac).
 name: sandbox-batch-page
 url: https://github.com/husobee/aireviewer-sandbox/pull/1

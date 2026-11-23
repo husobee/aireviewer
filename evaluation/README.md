@@ -21,7 +21,7 @@ alignment: exact                          # optional expected alignment category
 risk: high                                # optional: was the PR followed by fixes?
 ```
 
-Good sources: PRs later reverted or followed by bug fixes, and PRs with known tangled changes. Aim for about 30 cases across your repositories. The `sandbox-*` cases use husobee/aireviewer-sandbox, whose defects were planted on purpose.
+Good sources: PRs later reverted or followed by bug fixes, and PRs with known tangled changes. Aim for about 30 cases across your repositories. The `sandbox-*` cases are **examples**: they use the maintainers' private sandbox repository (with defects planted on purpose), so they will not run for you. Copy their format with PRs you can access.
 
 ## Running
 
