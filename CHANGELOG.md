@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-23
+
+First public release (pre-alpha). It contains every milestone below.
+
 ### Added (§21 slice 1: change sets; ADR 0014)
 - `/pr-review <url> <url> …`: review 2–8 PRs (any mix of repositories and forges) as one change.
   - **Set panel:** merge order, blocking problems, contracts, union alignment, and per-PR notes.
