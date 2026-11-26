@@ -7,8 +7,8 @@ authors:
 license: MIT
 repository-code: "https://github.com/husobee/aireviewer"
 url: "https://github.com/husobee/aireviewer"
-version: 0.1.0
-date-released: "2026-11-23"
+version: 0.2.0
+date-released: "2026-11-26"
 references:
   - type: article
     title: "Rethinking Code Review in the Age of AI: A Vision for Agentic Code Review"

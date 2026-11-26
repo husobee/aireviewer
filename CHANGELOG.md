@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
+Security release. Upgrade if you set `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN` or run in GitLab CI. Self-hosted forges must now be declared in `AIREVIEWER_GITHUB_HOSTS` / `AIREVIEWER_GITLAB_HOSTS`.
+
 ### Security (ADR 0015)
 - Forge tokens could be sent to an attacker-chosen host. A PR URL on any host with GitLab's `/-/merge_requests/` shape received `GITLAB_TOKEN` and `CI_JOB_TOKEN`. An unknown host with GitHub's `/pull/` shape received `GITHUB_TOKEN`/`GH_TOKEN`, both on API calls and on git fetches. Hosts were also trusted by name (`gitlab.attacker.example`). Tokens are now sent only to `github.com`, `gitlab.com` and hosts declared in `AIREVIEWER_GITHUB_HOSTS` / `AIREVIEWER_GITLAB_HOSTS`. URLs and remotes on other hosts are refused.
 - `CI_JOB_TOKEN` is sent only to `CI_SERVER_HOST`.
