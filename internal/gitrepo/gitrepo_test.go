@@ -113,3 +113,15 @@ func TestPrepare(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticatedGitDoesNotFollowRedirects(t *testing.T) {
+	g := &Git{remote: Remote{URL: "https://gitlab.com/a/b.git", Kind: forge.GitLab, Token: "secret"}}
+	env := strings.Join(g.env(), "\n")
+	if !strings.Contains(env, "=http.followRedirects\n") || !strings.Contains(env, "=false") {
+		t.Fatalf("authenticated git env does not disable redirects:\n%s", env)
+	}
+	g.remote.Token = ""
+	if strings.Contains(strings.Join(g.env(), "\n"), "followRedirects") {
+		t.Fatal("unauthenticated git should keep git's default redirect handling")
+	}
+}

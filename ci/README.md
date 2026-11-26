@@ -26,7 +26,7 @@ Copy `ci/github/aireviewer.yml` to `.github/workflows/`, set `AIREVIEWER_IMAGE`,
 ## 2b. GitLab CI
 Copy `ci/gitlab/aireviewer.gitlab-ci.yml` into the repository and `include` it, set `AIREVIEWER_IMAGE`, and add masked variables:
 - `ANTHROPIC_API_KEY`;
-- `GITLAB_TOKEN`: a project access token with the `api` scope and the Reporter role. `CI_JOB_TOKEN` cannot post MR notes.
+- `GITLAB_TOKEN`: a project access token with the `api` scope and the Reporter role. `CI_JOB_TOKEN` cannot post MR notes. See [docs/forge-tokens.md](../docs/forge-tokens.md) for what each feature needs.
 
 Jobs run only for MRs from the same project.
 

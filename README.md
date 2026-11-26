@@ -158,14 +158,16 @@ Configure a repository with `.aireviewer.yml` on its default branch: policies, r
 | Forge | Resolution order |
 |---|---|
 | GitHub / GHES | `GITHUB_TOKEN`, `GH_TOKEN`, then `gh auth token --hostname <host>` |
-| GitLab / self-managed | `GITLAB_TOKEN`, then `CI_JOB_TOKEN` (in CI) |
+| GitLab / self-managed | `GITLAB_TOKEN`, then `CI_JOB_TOKEN` (in CI, for the job's own instance only) |
 
-Public projects work unauthenticated, subject to rate limits. Self-hosted hosts whose names don't contain "github" or "gitlab" must be declared:
+Public projects work unauthenticated, subject to rate limits. Tokens are only sent to `github.com`, `gitlab.com` and self-hosted hosts you declare. URLs on any other host are refused:
 
 ```bash
 export AIREVIEWER_GITLAB_HOSTS=code.example.com
 export AIREVIEWER_GITHUB_HOSTS=ghe.example.com
 ```
+
+The exact fine-grained token permissions each feature needs are listed in [docs/forge-tokens.md](docs/forge-tokens.md).
 
 ### Where things are stored
 

@@ -36,12 +36,16 @@ func HostConfigFromEnv() HostConfig {
 	}
 }
 
-// KindForHost returns the forge for a hostname. Unknown hosts containing
-// "gitlab" or "github" are guessed; anything else is an error so the user can
-// configure it explicitly.
+// KindForHost returns the forge for a hostname. Only github.com, gitlab.com
+// and hosts declared in the config are known; anything else is an error.
+//
+// This is a security boundary: forge credentials are sent to whatever host
+// this accepts, so a host is never inferred from its name or from a URL's
+// shape (a PR URL naming "gitlab.attacker.example" must not receive
+// GITLAB_TOKEN). A port, if present, is ignored for matching.
 func (c HostConfig) KindForHost(host string) (Kind, error) {
 	h := strings.ToLower(host)
-	if i := strings.IndexByte(h, ':'); i >= 0 {
+	if i := strings.LastIndexByte(h, ':'); i >= 0 && !strings.Contains(h[i:], "]") {
 		h = h[:i]
 	}
 	switch h {
@@ -50,23 +54,25 @@ func (c HostConfig) KindForHost(host string) (Kind, error) {
 	case "gitlab.com":
 		return GitLab, nil
 	}
-	for _, g := range c.GitHubHosts {
-		if g == h {
-			return GitHub, nil
+	if h != "" {
+		for _, g := range c.GitHubHosts {
+			if g == h {
+				return GitHub, nil
+			}
+		}
+		for _, g := range c.GitLabHosts {
+			if g == h {
+				return GitLab, nil
+			}
 		}
 	}
-	for _, g := range c.GitLabHosts {
-		if g == h {
-			return GitLab, nil
-		}
-	}
-	switch {
-	case strings.Contains(h, "gitlab"):
-		return GitLab, nil
-	case strings.Contains(h, "github"):
-		return GitHub, nil
-	}
-	return "", fmt.Errorf("unknown forge host %q: set AIREVIEWER_GITHUB_HOSTS or AIREVIEWER_GITLAB_HOSTS", host)
+	return "", fmt.Errorf("unknown forge host %q: only github.com, gitlab.com and hosts listed in AIREVIEWER_GITHUB_HOSTS or AIREVIEWER_GITLAB_HOSTS are used, so credentials are never sent to an undeclared host", host)
+}
+
+// Trusted reports whether credentials for kind may be sent to host.
+func (c HostConfig) Trusted(kind Kind, host string) bool {
+	k, err := c.KindForHost(host)
+	return err == nil && k == kind
 }
 
 var (
@@ -74,33 +80,38 @@ var (
 	glMRPath = regexp.MustCompile(`^/(.+?)/-/merge_requests/(\d+)(?:/.*)?$`)
 )
 
-// ParsePRURL turns a PR/MR web URL into a PRRef. The URL shape decides the
-// forge when it is unambiguous (GitLab's "/-/merge_requests/" segment);
-// otherwise the host is consulted.
+// ParsePRURL turns a PR/MR web URL into a PRRef. The host must be known
+// (see KindForHost) and the URL shape must match that host's forge.
 func (c HostConfig) ParsePRURL(raw string) (PRRef, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {
 		return PRRef{}, fmt.Errorf("not a URL: %q", raw)
 	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return PRRef{}, fmt.Errorf("unsupported URL scheme in %q (expected https)", raw)
+	}
 	host := strings.ToLower(u.Host)
 	path := strings.TrimSuffix(u.Path, "/")
 
-	if m := glMRPath.FindStringSubmatch(path); m != nil {
+	var ref PRRef
+	switch m, g := glMRPath.FindStringSubmatch(path), ghPRPath.FindStringSubmatch(path); {
+	case m != nil:
 		n, _ := strconv.Atoi(m[2])
-		return PRRef{Repo: Repo{Forge: GitLab, Host: host, Project: m[1]}, Number: n}, nil
+		ref = PRRef{Repo: Repo{Forge: GitLab, Host: host, Project: m[1]}, Number: n}
+	case g != nil:
+		n, _ := strconv.Atoi(g[3])
+		ref = PRRef{Repo: Repo{Forge: GitHub, Host: host, Project: g[1] + "/" + g[2]}, Number: n}
+	default:
+		return PRRef{}, fmt.Errorf("unrecognised PR/MR URL %q (expected https://<host>/<owner>/<repo>/pull/<n> or https://<host>/<group>/<project>/-/merge_requests/<n>)", raw)
 	}
-	if m := ghPRPath.FindStringSubmatch(path); m != nil {
-		kind, err := c.KindForHost(host)
-		if err != nil {
-			kind = GitHub // the /owner/repo/pull/N shape is GitHub's
-		}
-		if kind != GitHub {
-			return PRRef{}, fmt.Errorf("URL %q looks like a GitHub PR but host is configured as %s", raw, kind)
-		}
-		n, _ := strconv.Atoi(m[3])
-		return PRRef{Repo: Repo{Forge: GitHub, Host: host, Project: m[1] + "/" + m[2]}, Number: n}, nil
+	kind, err := c.KindForHost(host)
+	if err != nil {
+		return PRRef{}, err
 	}
-	return PRRef{}, fmt.Errorf("unrecognised PR/MR URL %q (expected https://<host>/<owner>/<repo>/pull/<n> or https://<host>/<group>/<project>/-/merge_requests/<n>)", raw)
+	if kind != ref.Forge {
+		return PRRef{}, fmt.Errorf("URL %q looks like a %s %s but host %s is configured as %s", raw, ref.Forge, ref.Forge.Noun(), host, kind)
+	}
+	return ref, nil
 }
 
 var scpLike = regexp.MustCompile(`^(?:[^@/]+@)?([^:/]+):(.+)$`)
