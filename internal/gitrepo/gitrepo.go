@@ -69,7 +69,10 @@ func (g *Git) env() []string {
 			user = "oauth2"
 		}
 		cred := base64.StdEncoding.EncodeToString([]byte(user + ":" + g.remote.Token))
-		kv = append(kv, [2]string{"http.extraHeader", "Authorization: Basic " + cred})
+		kv = append(kv, [2]string{"http.extraHeader", "Authorization: Basic " + cred},
+			// git re-sends http.extraHeader to wherever a redirect points, so
+			// an authenticated fetch must not follow redirects at all.
+			[2]string{"http.followRedirects", "false"})
 	}
 	if len(kv) == 0 {
 		return env

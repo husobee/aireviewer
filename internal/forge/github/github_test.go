@@ -114,3 +114,28 @@ func TestLinkedIssues(t *testing.T) {
 		t.Errorf("linked = %+v", got)
 	}
 }
+
+// The GraphQL call sets Authorization itself; a redirect off the API host
+// must not be followed with it.
+func TestGraphQLTokenNotSentAcrossRedirect(t *testing.T) {
+	leaked := false
+	evil := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked = true
+		}
+	}))
+	defer evil.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, evil.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer api.Close()
+	p, err := New(Options{Host: "github.com", Token: "secret", BaseURL: api.URL + "/api/v3/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := &forge.PR{Ref: forge.PRRef{Repo: forge.Repo{Forge: forge.GitHub, Host: "github.com", Project: "o/r"}, Number: 1}}
+	_, _ = p.LinkedIssues(context.Background(), pr)
+	if leaked {
+		t.Fatal("Authorization reached the redirect target")
+	}
+}

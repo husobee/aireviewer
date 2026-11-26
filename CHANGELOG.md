@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Security (ADR 0015)
+- Forge tokens could be sent to an attacker-chosen host. A PR URL on any host with GitLab's `/-/merge_requests/` shape received `GITLAB_TOKEN` and `CI_JOB_TOKEN`. An unknown host with GitHub's `/pull/` shape received `GITHUB_TOKEN`/`GH_TOKEN`, both on API calls and on git fetches. Hosts were also trusted by name (`gitlab.attacker.example`). Tokens are now sent only to `github.com`, `gitlab.com` and hosts declared in `AIREVIEWER_GITHUB_HOSTS` / `AIREVIEWER_GITLAB_HOSTS`. URLs and remotes on other hosts are refused.
+- `CI_JOB_TOKEN` is sent only to `CI_SERVER_HOST`.
+- Forge API clients no longer follow redirects to another host, which leaked GitLab's `Private-Token` header. Authenticated git fetches no longer follow redirects, which leaked `http.extraHeader`.
+
+### Changed
+- **Breaking:** self-hosted hosts are no longer guessed from names containing "github" or "gitlab". Declare them in `AIREVIEWER_GITHUB_HOSTS` / `AIREVIEWER_GITLAB_HOSTS`.
+
+### Added
+- [docs/forge-tokens.md](docs/forge-tokens.md): least-privilege GitHub fine-grained token permissions and GitLab scopes and roles, per feature.
+
 ## [0.1.0] - 2026-11-23
 
 First public release (pre-alpha). It contains every milestone below.

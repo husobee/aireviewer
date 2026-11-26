@@ -19,6 +19,17 @@ func TestParsePRURL(t *testing.T) {
 		{in: "https://code.example.com/a/b/pull/1", wantErr: true}, // GitHub shape on a GitLab host
 		{in: "https://github.com/octo/repo/issues/12", wantErr: true},
 		{in: "not a url", wantErr: true},
+		// Credentials are sent to the parsed host: undeclared hosts never parse.
+		{in: "https://evil.example/a/b/-/merge_requests/1", wantErr: true},
+		{in: "https://evil.example/o/r/pull/1", wantErr: true},
+		{in: "https://gitlab.evil.example/a/b/-/merge_requests/1", wantErr: true},
+		{in: "https://github.evil.example/o/r/pull/1", wantErr: true},
+		{in: "https://github.com.evil.example/o/r/pull/1", wantErr: true},
+		{in: "https://github.com@evil.example/o/r/pull/1", wantErr: true},
+		{in: "https://github.com/a/b/-/merge_requests/1", wantErr: true}, // GitLab shape on a GitHub host
+		{in: "https://ghe.example.com/a/b/-/merge_requests/1", wantErr: true},
+		{in: "ftp://github.com/o/r/pull/1", wantErr: true},
+		{in: "https://GitHub.com:443/o/r/pull/2", want: PRRef{Repo{GitHub, "github.com:443", "o/r"}, 2}},
 	}
 	for _, tt := range tests {
 		got, err := c.ParsePRURL(tt.in)
@@ -44,6 +55,8 @@ func TestParseRemote(t *testing.T) {
 		{in: "ssh://git@code.example.com:2222/grp/sub/proj.git", want: Repo{GitLab, "code.example.com", "grp/sub/proj"}},
 		{in: "https://gitlab.com/grp/proj.git/", want: Repo{GitLab, "gitlab.com", "grp/proj"}},
 		{in: "git@unknown.example.org:a/b.git", wantErr: true},
+		{in: "git@gitlab.evil.example:a/b.git", wantErr: true},
+		{in: "https://github.evil.example/a/b.git", wantErr: true},
 		{in: "https://github.com/onlyowner", wantErr: true},
 	}
 	for _, tt := range tests {
@@ -54,6 +67,31 @@ func TestParseRemote(t *testing.T) {
 		}
 		if !tt.wantErr && got != tt.want {
 			t.Errorf("ParseRemote(%q) = %+v, want %+v", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestTrusted(t *testing.T) {
+	c := HostConfig{GitLabHosts: []string{"code.example.com"}, GitHubHosts: []string{"ghe.example.com"}}
+	for _, tt := range []struct {
+		kind Kind
+		host string
+		want bool
+	}{
+		{GitHub, "github.com", true},
+		{GitHub, "GitHub.com:443", true},
+		{GitLab, "gitlab.com", true},
+		{GitLab, "code.example.com:8443", true},
+		{GitHub, "ghe.example.com", true},
+		{GitHub, "gitlab.com", false},
+		{GitLab, "ghe.example.com", false},
+		{GitHub, "github.evil.example", false},
+		{GitLab, "gitlab.evil.example", false},
+		{GitHub, "github.com.", false},
+		{GitHub, "", false},
+	} {
+		if got := c.Trusted(tt.kind, tt.host); got != tt.want {
+			t.Errorf("Trusted(%s, %q) = %v, want %v", tt.kind, tt.host, got, tt.want)
 		}
 	}
 }

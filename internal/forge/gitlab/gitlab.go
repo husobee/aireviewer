@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	gl "gitlab.com/gitlab-org/api/client-go"
 
@@ -41,10 +40,7 @@ func New(o Options) (*Provider, error) {
 	if base == "" {
 		base = "https://" + o.Host + "/api/v4"
 	}
-	hc := o.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Timeout: 60 * time.Second}
-	}
+	hc := forge.SameHostClient(o.HTTPClient)
 	opts := []gl.ClientOptionFunc{gl.WithBaseURL(base), gl.WithHTTPClient(hc)}
 	var (
 		c   *gl.Client

@@ -42,12 +42,11 @@ type Options struct {
 
 // New builds a GitHub provider.
 func New(o Options) (*Provider, error) {
+	hc := forge.SameHostClient(o.HTTPClient)
 	opts := []gh.ClientOptionsFunc{
 		gh.WithUserAgent("aireviewer"),
 		gh.WithTimeout(60 * time.Second),
-	}
-	if o.HTTPClient != nil {
-		opts = append(opts, gh.WithHTTPClient(o.HTTPClient))
+		gh.WithHTTPClient(hc),
 	}
 	if o.Token != "" {
 		opts = append(opts, gh.WithAuthToken(o.Token))
@@ -62,10 +61,6 @@ func New(o Options) (*Provider, error) {
 	c, err := gh.NewClient(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("github client: %w", err)
-	}
-	hc := o.HTTPClient
-	if hc == nil {
-		hc = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &Provider{host: o.Host, base: base, token: o.Token, http: hc, client: c}, nil
 }

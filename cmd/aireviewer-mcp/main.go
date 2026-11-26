@@ -55,7 +55,7 @@ func main() {
 	defer stop()
 
 	hosts := forge.HostConfigFromEnv()
-	reg := providers.NewRegistry()
+	reg := providers.NewRegistry(hosts)
 
 	switch flag.Arg(0) {
 	case "version":
@@ -89,7 +89,7 @@ func main() {
 		Hosts:     hosts,
 		Providers: reg,
 		Store:     runctx.New(*root),
-		Tokens:    reg.Tokens,
+		Tokens:    reg.Token,
 		CacheDir:  cache,
 		Sandbox:   sandbox.Docker{},
 		VoiceDir:  voice.DefaultDir(),
